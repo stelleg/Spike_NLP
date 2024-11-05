@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 """
 Model runner for ESM-FCN model (single target).
+This one loads in from parquet of preembedded sequences. This does not work for 
+other embeddings because of crashing.
 """
 import os
 import re
@@ -15,13 +17,12 @@ import pandas as pd
 from typing import Union
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
-from transformers import AutoTokenizer, EsmModel, EsmConfig
 import seaborn as sns
 import matplotlib.pyplot as plt
 from prettytable import PrettyTable
 
-from runner_util_dms import (
-    DMSDataset,
+from runner_util_dms_esm import (
+    DMSEmbeddedDataset,
     count_parameters,
     save_model,
     load_model,
@@ -60,22 +61,8 @@ class FCN(nn.Module):
 
         return prediction
 
-# ESM-FCN
-class ESM_FCN(nn.Module):
-    def __init__(self, esm, fcn):
-        super().__init__()
-        self.esm = esm
-        self.fcn = fcn
-
-    def forward(self, tokenized_seqs):
-        with torch.set_grad_enabled(self.training):  # Enable gradients, managed by model.eval() or model.train() in epoch_iteration
-            esm_last_hidden_state = self.esm(**tokenized_seqs).last_hidden_state # shape: [batch_size, sequence_length, embedding_dim]
-            esm_cls_embedding = esm_last_hidden_state[:, 0, :]  # CLS token embedding (sequence-level representations), [batch_size, embedding_dim]
-            output = self.fcn(esm_cls_embedding).squeeze(1) # [batch_size]
-        return output
-
 # MODEL RUNNING
-def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: int, lr:float, max_batch: Union[int, None], device: str, run_dir: str, save_as: str, saved_model_pth:str=None, from_checkpoint:bool=False):
+def run_model(model, train_data_loader, test_data_loader, n_epochs: int, lr:float, max_batch: Union[int, None], device: str, run_dir: str, save_as: str, saved_model_pth:str=None, from_checkpoint:bool=False):
     """ Run a model through train and test epochs. """
 
     model = model.to(device)
@@ -112,8 +99,8 @@ def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: i
     start_time = time.time()
 
     for epoch in range(starting_epoch, n_epochs + 1):
-        train_mse, train_rmse = epoch_iteration(model, tokenizer, loss_fn, optimizer, train_data_loader, epoch, max_batch, device, mode='train')
-        test_mse, test_rmse = epoch_iteration(model, tokenizer, loss_fn, optimizer, test_data_loader, epoch, max_batch, device, mode='test')
+        train_mse, train_rmse = epoch_iteration(model, loss_fn, optimizer, train_data_loader, epoch, max_batch, device, mode='train')
+        test_mse, test_rmse = epoch_iteration(model, loss_fn, optimizer, test_data_loader, epoch, max_batch, device, mode='test')
 
         print(f'Epoch {epoch} | Train RMSE Loss: {train_rmse:.4f}, Test RMSE Loss: {test_rmse:.4f}')  
 
@@ -147,7 +134,7 @@ def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: i
     formatted_duration = str(datetime.timedelta(seconds=duration))
     print(f'Training and testing complete in: {formatted_duration} (D day(s), H:MM:SS.microseconds)')
 
-def epoch_iteration(model, tokenizer, loss_fn, optimizer, data_loader, epoch, max_batch, device, mode):
+def epoch_iteration(model, loss_fn, optimizer, data_loader, epoch, max_batch, device, mode):
     """ Used in run_model. """
     
     model.train() if mode=='train' else model.eval()
@@ -168,20 +155,19 @@ def epoch_iteration(model, tokenizer, loss_fn, optimizer, data_loader, epoch, ma
         if max_batch > 0 and batch >= max_batch:
             break
 
-        seq_ids, seqs, targets = batch_data
-        targets = targets.to(device).float()
-        tokenized_seqs = tokenizer(seqs, return_tensors="pt").to(device)
+        seq_ids, embeddings, targets = batch_data
+        embeddings, targets = embeddings.to(device), targets.to(device).float()
    
         if mode == 'train':
             optimizer.zero_grad()
-            preds = model(tokenized_seqs)
+            preds = model(embeddings).squeeze(-1)
             batch_loss = loss_fn(preds, targets)
             batch_loss.backward()
             optimizer.step()
 
         else:
             with torch.no_grad():
-                preds = model(tokenized_seqs)
+                preds = model(embeddings).squeeze(-1)
                 batch_loss = loss_fn(preds, targets)
 
         total_loss += batch_loss.item()
@@ -198,14 +184,14 @@ def epoch_iteration(model, tokenizer, loss_fn, optimizer, data_loader, epoch, ma
 if __name__=='__main__':
 
     # Data/results directories
-    result_tag = 'binding' # specify expression or binding
+    result_tag = 'expression' # specify expression or binding
     data_dir = os.path.join(os.path.dirname(__file__), f'../../../data/dms') 
-    results_dir = os.path.join(os.path.dirname(__file__), f'../../../results/run_results/esm_fcn')
+    results_dir = os.path.join(os.path.dirname(__file__), f'../../../results/run_results/fcn-ESM_CLS_embedded')
 
     # Create run directory for results
     now = datetime.datetime.now()
     date_hour_minute = now.strftime("%Y-%m-%d_%H-%M")
-    run_dir = os.path.join(results_dir, f"esm_fcn-DMS_OLD-{result_tag}-{date_hour_minute}")
+    run_dir = os.path.join(results_dir, f"fcn-ESM_CLS_embedded-DMS_OLD-{result_tag}-{date_hour_minute}")
     os.makedirs(run_dir, exist_ok = True)
 
     # Run setup
@@ -214,34 +200,27 @@ if __name__=='__main__':
     max_batch = -1
     num_workers = 64
     lr = 1e-5
-    device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
 
     # Create Dataset and DataLoader
     torch.manual_seed(0)
 
-    train_dataset = DMSDataset(os.path.join(data_dir, "mutation_combined_DMS_OLD_train.csv"), result_tag)
+    train_dataset = DMSEmbeddedDataset(os.path.join(data_dir, "parquets/mutation_combined_DMS_OLD_train_ESM-CLS-embedded.parquet"), result_tag)
     train_data_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=False, num_workers=num_workers, pin_memory=True)
 
-    test_dataset = DMSDataset(os.path.join(data_dir, "mutation_combined_DMS_OLD_test.csv"), result_tag)
+    test_dataset = DMSEmbeddedDataset(os.path.join(data_dir, "parquets/mutation_combined_DMS_OLD_test_ESM-CLS-embedded.parquet"), result_tag)
     test_data_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, drop_last=False, num_workers=num_workers, pin_memory=True)
-
-    # ESM input
-    esm_version = "facebook/esm2_t6_8M_UR50D" 
-    esm = EsmModel.from_pretrained(esm_version, cache_dir='../../../../model_downloads').to(device)
-    tokenizer = AutoTokenizer.from_pretrained(esm_version, cache_dir='../../../../model_downloads')
 
     # FCN input
     size = 320
     fcn_input_size = size  
     fcn_hidden_size = size
     fcn_num_layers = 5
-    fcn = FCN(fcn_input_size, fcn_hidden_size, fcn_num_layers)
-
-    model = ESM_FCN(esm, fcn)
+    model = FCN(fcn_input_size, fcn_hidden_size, fcn_num_layers)
 
     # Run
     count_parameters(model)
     saved_model_pth = None
     from_checkpoint = False
-    save_as = f"esm_fcn-DMS_OLD_{result_tag}-train_{len(train_dataset)}_test_{len(test_dataset)}"
-    run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs, lr, max_batch, device, run_dir, save_as, saved_model_pth, from_checkpoint)
+    save_as = f"fcn-ESM_CLS_embedded-DMS_OLD_{result_tag}-train_{len(train_dataset)}_test_{len(test_dataset)}"
+    run_model(model, train_data_loader, test_data_loader, n_epochs, lr, max_batch, device, run_dir, save_as, saved_model_pth, from_checkpoint)

@@ -71,7 +71,7 @@ def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: i
                 raise ValueError(f"Starting epoch ({starting_epoch}) is greater than the total number of epochs to run ({n_epochs}). Adjust the number of epochs, 'n_epochs'.")
         
         else:
-            model_state, _, _, _, _ = load_model(saved_model_pth, device)
+            model_state, _, _, _, _, _ = load_model(saved_model_pth, device)
             model.load_state_dict(model_state)
 
     with open(metrics_csv, "a") as fa:

@@ -233,7 +233,7 @@ if __name__=='__main__':
     os.makedirs(run_dir, exist_ok = True)
 
     # Run setup
-    n_epochs = 5000
+    n_epochs = 1000
     batch_size = 64
     max_batch = -1
     num_workers = 64

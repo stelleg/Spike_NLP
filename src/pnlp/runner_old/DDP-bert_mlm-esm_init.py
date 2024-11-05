@@ -9,9 +9,9 @@ Usage:
     > --standalone: utilize single node
     > --nproc_per_node: number of processes/gpus
 
-    Example equivalent commands to run (single node, 2 gpu; top is for bio-lambda cluster, bottom is generic):
-        /data/miniconda3/envs/spike_env/bin/time -v torchrun --standalone --nproc_per_node=2 DDP-bert_mlm-esm_init.py 
-        /usr/bin/time -v torchrun --standalone --nproc_per_node=2 DDP-bert_mlm-esm_init.py 
+    Example equivalent commands to run (single node, 4 gpu; top is for bio-lambda cluster, bottom is generic):
+        /data/miniconda3/envs/spike_env/bin/time -v torchrun --standalone --nproc_per_node=4 DDP-bert_mlm-esm_init.py 
+        /usr/bin/time -v torchrun --standalone --nproc_per_node=4 DDP-bert_mlm-esm_init.py 
 """
 import os
 import re
@@ -35,7 +35,7 @@ from collections import defaultdict
 from pnlp.model.language import BERT, ProteinLM
 from pnlp.embedding.tokenizer import ProteinTokenizer, token_to_index
 
-from rbd_bert_mlm_runner_util import (
+from runner_util_rbd_bert_mlm import (
     RBDDataset,
     ScheduledOptim,
     count_parameters,
@@ -258,7 +258,12 @@ def epoch_iteration(model, tokenizer, loss_fn, scheduler, data_loader, epoch, ma
 @record
 def main():
     # Initialize process group - DDP
-    dist.init_process_group(backend='nccl', timeout=datetime.timedelta(seconds=5400))
+    dist.init_process_group(
+        backend='nccl', 
+        timeout=datetime.timedelta(seconds=5400), 
+        rank=int(os.environ['RANK']), 
+        world_size=int(os.environ['WORLD_SIZE']) 
+    )
 
     # Data/results directories
     data_dir = os.path.join(os.path.dirname(__file__), f'../../../data/rbd')

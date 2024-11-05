@@ -20,18 +20,10 @@ from typing import Union
 from prettytable import PrettyTable
 from collections import defaultdict
 
-from pnlp.model.language import BERT, ProteinLM
+from pnlp.model.language import BERT, ProteinMaskedLanguageModel
 from pnlp.embedding.tokenizer import ProteinTokenizer, token_to_index
 
-from runner_util_rbd_bert_mlm import (
-    count_parameters,
-    save_model,
-    load_model,
-    load_model_checkpoint,
-    plot_log_file,
-)
-
-from runner_util_dms import (
+from runner_util_dms_nlp import (
     DMSDataset,
     count_parameters,
     save_model,
@@ -40,37 +32,92 @@ from runner_util_dms import (
     plot_log_file,
 )
 
+# BLSTM
+class BLSTM(nn.Module):
+    """ Bidirectional LSTM. Output is embedding layer, not prediction value."""
+
+    def __init__(self,
+                 lstm_input_size,    # The number of expected features.
+                 lstm_hidden_size,   # The number of features in hidden state h.
+                 lstm_num_layers,    # Number of recurrent layers in LSTM.
+                 lstm_bidirectional, # Bidrectional LSTM.
+                 fcn_hidden_size,    # The number of features in hidden layer of CN.
+                 fcn_num_layers):    # The number of fcn layers
+        super().__init__()
+
+        # LSTM layer
+        self.lstm = nn.LSTM(input_size=lstm_input_size,
+                            hidden_size=lstm_hidden_size,
+                            num_layers=lstm_num_layers,
+                            bidirectional=lstm_bidirectional,
+                            batch_first=True)           
+
+        # FCN layer(s)
+        layers = []
+        input_size = 2 * lstm_hidden_size if lstm_bidirectional else lstm_hidden_size
+
+        for _ in range(fcn_num_layers):
+            layers.append(nn.Linear(input_size, fcn_hidden_size))
+            layers.append(nn.ReLU())
+            input_size = fcn_hidden_size
+
+        self.fcn = nn.Sequential(*layers)
+
+        # FCN output layer
+        self.out = nn.Linear(fcn_hidden_size, 1)
+
+    def forward(self, x):
+        if x.dim() == 2:
+            x = x.unsqueeze(1)  # Add a sequence length dimension of 1, now [batch_size, sequence_length, features]
+
+        num_directions = 2 if self.lstm.bidirectional else 1
+        h_0 = torch.zeros(num_directions * self.lstm.num_layers, x.size(0), self.lstm.hidden_size, device=x.device)
+        c_0 = torch.zeros(num_directions * self.lstm.num_layers, x.size(0), self.lstm.hidden_size, device=x.device)
+
+        lstm_out, (h_n, c_n) = self.lstm(x, (h_0, c_0))
+        lstm_final_out = lstm_out[:, -1, :]
+        fcn_out = self.fcn(lstm_final_out)
+        prediction = self.out(fcn_out)  # [batch_size, 1]
+
+        return prediction
+
+# BERT-BLSTM
+class BERT_BLSTM(nn.Module):
+    def __init__(self, bert, blstm, vocab_size):
+        super().__init__()
+        self.bert = bert
+        self.mlm = ProteinMaskedLanguageModel(self.bert.hidden, vocab_size)
+        self.blstm = blstm
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.bert(x)
+        error_1 = self.mlm(x) # error from masked language
+        error_2 = self.blstm(x).squeeze(1) # error from regession
+        return error_1, error_2
+
 # MODEL RUNNING
 def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: int, lr:float, max_batch: Union[int, None], device: str, run_dir: str, save_as: str, saved_model_pth:str=None, from_checkpoint:bool=False):
     """ Run a model through train and test epochs. """
 
     model = model.to(device)
-    loss_fn = nn.CrossEntropyLoss(reduction='sum').to(device)  # sum of CEL at batch level.
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr, betas=(0.9, 0.999), weight_decay=0.01)
-    scheduler = ScheduledOptim(
-        optimizer, 
-        d_model=model.bert.embedding_dim, 
-        n_warmup_steps=(len(train_data_loader.dataset) / train_data_loader.batch_size) * 0.1
-    ) 
+    blstm_loss_fn = nn.MSELoss(reduction='sum').to(device) 
+    mlm_loss_fn = nn.CrossEntropyLoss(reduction='sum').to(device) 
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     metrics_csv = os.path.join(run_dir, f"{save_as}_metrics.csv")
     metrics_img = os.path.join(run_dir, f"{save_as}_metrics.pdf")
-    preds_csv = os.path.join(run_dir, f"{save_as}_predictions.csv")
-    preds_img = os.path.join(run_dir, f"{save_as}_predictions.pdf")
 
     starting_epoch = 1
-    best_accuracy = 0
+    best_mlm_accuracy = 0
     best_loss = float('inf')
-    aa_preds_tracker = {}
     
     # Load saved model
     if saved_model_pth is not None and os.path.exists(saved_model_pth):
         if from_checkpoint:
-            model_state, optimizer_state, scheduler_state, starting_epoch, best_accuracy, best_loss = load_model(saved_model_pth, device)
+            model_state, optimizer_state, starting_epoch, best_accuracy, best_loss = load_model(saved_model_pth, device)
 
             model.load_state_dict(model_state)
             optimizer.load_state_dict(optimizer_state)
-            scheduler.load_state_dict(scheduler_state)
             starting_epoch += 1
             
             if starting_epoch > n_epochs:
@@ -82,58 +129,59 @@ def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: i
 
     with open(metrics_csv, "a") as fa:
         if from_checkpoint: load_model_checkpoint(saved_model_pth, metrics_csv, starting_epoch)
-        else: fa.write(f"Epoch,Train Accuracy,Train Loss,Test Accuracy,Test Loss\n")
+        else: 
+            fa.write(
+                f"Epoch,"
+                f"Train MLM Accuracy,Test MLM Accuracy,"
+                f"Train MLM Loss,Test MLM Loss,"
+                f"Train BLSTM MSE,Test BLSTM MSE,"
+                f"Train BLSTM RMSE,Test BLSTM RMSE,"
+                f"Train Loss,Test Loss\n"
+            )
 
     # Running
     start_time = time.time()
 
     for epoch in range(starting_epoch, n_epochs + 1):
-        train_accuracy, train_loss = epoch_iteration(model, tokenizer, loss_fn, scheduler, train_data_loader, epoch, max_batch, device, mode='train')
-        test_accuracy, test_loss, aa_pred_counter = epoch_iteration(model, tokenizer, loss_fn, scheduler, test_data_loader, epoch, max_batch, device, mode='test')
+        train_mlm_accuracy, train_mlm_loss, train_blstm_mse, train_blstm_rmse, train_loss = epoch_iteration(model, tokenizer, mlm_loss_fn, blstm_loss_fn, optimizer, train_data_loader, epoch, max_batch, device, mode='train')
+        test_mlm_accuracy, test_mlm_loss, test_blstm_mse, test_blstm_rmse, test_loss = epoch_iteration(model, tokenizer, mlm_loss_fn, blstm_loss_fn, optimizer, test_data_loader, epoch, max_batch, device, mode='test')
 
-        print(f'Epoch {epoch} | Train Accuracy: {train_accuracy:.4f}, Train Loss: {train_loss:.4f}')
-        print(f'{" "*(7+len(str(epoch)))}| Test Accuracy: {test_accuracy:.4f}, Test Loss: {test_loss:.4f}\n') 
+        print(f'Epoch {epoch} | Train MLM Accuracy: {train_mlm_accuracy:.4f}, Test MLM Accuracy: {test_mlm_accuracy:.4f}')
+        print(f'{" "*(8+len(str(epoch)))} Train MLM Loss: {train_mlm_loss:.4f}, Test MLM Loss: {test_mlm_loss:.4f}')
+        print(f'{" "*(8+len(str(epoch)))} Train BLSTM RMSE: {train_blstm_rmse:.4f}, Test BLSTM RMSE: {test_blstm_rmse:.4f}')
+        print(f'{" "*(8+len(str(epoch)))} Train Loss: {train_loss:.4f}, Test Loss: {test_loss:.4f}\n')
         
-        with open(metrics_csv, "a") as fa:         
-            fa.write(f"{epoch},{train_accuracy},{train_loss},{test_accuracy},{test_loss}\n")
+        with open(metrics_csv, "a") as fa:  
+            fa.write(
+                f"{epoch},"
+                f"{train_mlm_accuracy},{test_mlm_accuracy},"
+                f"{train_mlm_loss},{test_mlm_loss},"
+                f"{train_blstm_mse},{test_blstm_mse},"
+                f"{train_blstm_rmse},{test_blstm_rmse},"
+                f"{train_loss},{test_loss}\n"
+            )
             fa.flush()
 
-        for key, value in aa_pred_counter.items():
-            if key not in aa_preds_tracker:
-                aa_preds_tracker[key] = {}
-            aa_preds_tracker[key][epoch] = value
-
         # Save best
-        if test_accuracy > best_accuracy or (test_accuracy == best_accuracy and test_loss < best_loss):
-            best_accuracy = test_accuracy
+        if test_mlm_accuracy > best_mlm_accuracy or (test_mlm_accuracy == best_mlm_accuracy and test_loss < best_loss):
+            best_mlm_accuracy = test_mlm_accuracy
             best_loss = test_loss
             model_path = os.path.join(run_dir, f'best_saved_model.pth')
-            print(f"NEW BEST model: accuracy {best_accuracy:.4f} and loss {best_loss:.4f}")
-            save_model(model, optimizer, scheduler, model_path, epoch, test_accuracy, test_loss)
+            print(f"NEW BEST model: accuracy {best_mlm_accuracy:.4f} and loss {best_loss:.4f}")
+            save_model(model, optimizer, model_path, epoch, test_mlm_accuracy, test_loss)
         
         # Save every 10 epochs
         if epoch > 0 and epoch % 10 == 0:
             model_path = os.path.join(run_dir, f'saved_model-epoch_{epoch}.pth')
-            save_model(model, optimizer, scheduler, model_path, epoch, test_accuracy, test_loss)
+            save_model(model, optimizer, model_path, epoch, test_mlm_accuracy, test_loss)
 
         # Save checkpoint 
         model_path = os.path.join(run_dir, f'checkpoint_saved_model.pth')
-        save_model(model, optimizer, scheduler, model_path, epoch, test_accuracy, test_loss)
+        save_model(model, optimizer, model_path, epoch, test_mlm_accuracy, test_loss)
             
         print("")
 
-    # Write amino acid predictions
-    with open(preds_csv, 'w') as fb:
-        header = ", ".join(f"epoch {epoch}" for epoch in range(1, n_epochs + 1))
-        fb.write(f"expected_aa->predicted_aa, {header}\n")
-
-        for key, values in aa_preds_tracker.items():
-            predictions_per_epoch = [values.get(epoch, 0) for epoch in range(1, n_epochs + 1)]
-            data_row = ", ".join(map(str, predictions_per_epoch))
-            fb.write(f"{key}, {data_row}\n")
-
     plot_log_file(metrics_csv, metrics_img)
-    plot_aa_preds_heatmap(preds_csv, preds_img)
 
     # End timer and print duration
     end_time = time.time()
@@ -141,7 +189,7 @@ def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: i
     formatted_duration = str(datetime.timedelta(seconds=duration))
     print(f'Training and testing complete in: {formatted_duration} (D day(s), H:MM:SS.microseconds)')
 
-def epoch_iteration(model, tokenizer, loss_fn, scheduler, data_loader, epoch, max_batch, device, mode):
+def epoch_iteration(model, tokenizer, mlm_loss_fn, blstm_loss_fn, optimizer, data_loader, epoch, max_batch, device, mode):
     """ Used in run_model. """
     
     model.train() if mode=='train' else model.eval()
@@ -150,11 +198,13 @@ def epoch_iteration(model, tokenizer, loss_fn, scheduler, data_loader, epoch, ma
                           desc=f'Epoch_{mode}: {epoch}',
                           total=len(data_loader),
                           bar_format='{l_bar}{r_bar}')
-
+    
+    total_mlm_loss = 0
+    total_blstm_loss = 0
     total_loss = 0
     total_masked = 0
+    total_items = 0
     correct_predictions = 0
-    aa_pred_counter = defaultdict(int)
 
     # Set max_batch if None
     if not max_batch:
@@ -164,60 +214,68 @@ def epoch_iteration(model, tokenizer, loss_fn, scheduler, data_loader, epoch, ma
         if max_batch > 0 and batch >= max_batch:
             break
 
-        seq_ids, seqs = batch_data
+        seq_ids, seqs, targets = batch_data
+        targets = targets.to(device).float()
         masked_tokenized_seqs = tokenizer(seqs).to(device) 
         unmasked_tokenized_seqs = tokenizer._batch_pad(seqs).to(device)
    
         if mode == 'train':
-            scheduler.zero_grad()
-            preds = model(masked_tokenized_seqs)
-            batch_loss = loss_fn(preds.transpose(1, 2), unmasked_tokenized_seqs)
+            optimizer.zero_grad()
+            mlm_preds, blstm_preds = model(masked_tokenized_seqs)
+            batch_mlm_loss = mlm_loss_fn(mlm_preds.transpose(1, 2), unmasked_tokenized_seqs)
+            batch_blstm_loss = blstm_loss_fn(blstm_preds, targets)
+            print(f"mlm: {batch_mlm_loss*0.1}; blstm: {batch_blstm_loss}")
+            batch_loss = batch_mlm_loss*0.1 + batch_blstm_loss # Needs weights to be same scale?
             batch_loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            scheduler.step_and_update_lr()
+            optimizer.step()
 
         else:
             with torch.no_grad():
-                preds = model(masked_tokenized_seqs)
-                batch_loss = loss_fn(preds.transpose(1, 2), unmasked_tokenized_seqs)
+                mlm_preds, blstm_preds = model(masked_tokenized_seqs)
+                batch_mlm_loss = mlm_loss_fn(mlm_preds.transpose(1, 2), unmasked_tokenized_seqs)
+                batch_blstm_loss = blstm_loss_fn(blstm_preds, targets)
+                batch_loss = batch_mlm_loss + batch_blstm_loss
 
         # Loss
+        total_mlm_loss += batch_mlm_loss.item()
+        total_blstm_loss += batch_blstm_loss.item()
         total_loss += batch_loss.item()
+        total_items += targets.size(0)
 
         # Accuracy
-        predicted_tokens = torch.max(preds, dim=-1)[1]
+        predicted_tokens = torch.max(mlm_preds, dim=-1)[1]
         masked_locations = torch.nonzero(torch.eq(masked_tokenized_seqs, token_to_index['<MASK>']), as_tuple=True)
         correct_predictions += torch.eq(predicted_tokens[masked_locations], unmasked_tokenized_seqs[masked_locations]).sum().item()
         total_masked += masked_locations[0].numel()     
 
-        # Track amino acid predictions
-        if mode == "test":
-            token_to_aa = {i:aa for i, aa in enumerate('ACDEFGHIKLMNPQRSTUVWXY')}                
-            aa_keys = [f"{token_to_aa.get(token.item())}->{token_to_aa.get(pred_token.item())}" for token, pred_token in zip(unmasked_tokenized_seqs[masked_locations], predicted_tokens[masked_locations])]
-            for aa_key in aa_keys:
-                aa_pred_counter[aa_key] += 1
+    # Average accuracy/loss per masked token - MLM
+    avg_mlm_loss = total_mlm_loss / total_masked
+    avg_mlm_accuracy = (correct_predictions / total_masked) * 100
 
-    # Average accuracy/loss per masked token
-    avg_loss = total_loss / total_masked
-    avg_accuracy = (correct_predictions / total_masked) * 100
+    # RMSE - BLSTM
+    blstm_mse = total_blstm_loss/total_items
+    blstm_rmse = np.sqrt(blstm_mse)
 
-    if mode == "train": return avg_accuracy, avg_loss
-    else: return avg_accuracy, avg_loss, aa_pred_counter
+    # MLM + BLSTM Average loss per item
+    avg_loss = total_loss / total_items
 
+    return avg_mlm_accuracy, avg_mlm_loss, blstm_mse, blstm_rmse, avg_loss
+      
 if __name__=='__main__':
 
     # Data/results directories
-    data_dir = os.path.join(os.path.dirname(__file__), f'../../../data/rbd')
-    results_dir = os.path.join(os.path.dirname(__file__), f'../../../results/run_results/bert_mlm')
+    result_tag = 'binding' # specify expression or binding
+    data_dir = os.path.join(os.path.dirname(__file__), f'../../../data/dms')
+    results_dir = os.path.join(os.path.dirname(__file__), f'../../../results/run_results/bert_blstm')
 
     # Create run directory for results
     now = datetime.datetime.now()
     date_hour_minute = now.strftime("%Y-%m-%d_%H-%M")
-    run_dir = os.path.join(results_dir, f"bert_mlm-RBD-{date_hour_minute}")
+    run_dir = os.path.join(results_dir, f"bert_blstm-DMS_OLD-{date_hour_minute}")
     os.makedirs(run_dir, exist_ok = True)
 
     # Run setup
-    n_epochs = 100
+    n_epochs = 1
     batch_size = 64
     max_batch = -1
     num_workers = 64
@@ -227,10 +285,10 @@ if __name__=='__main__':
     # Create Dataset and DataLoader
     torch.manual_seed(0)
 
-    train_dataset = RBDDataset(os.path.join(data_dir, "spikeprot0528.clean.uniq.noX.RBD.metadata.variants_train.csv"))
+    train_dataset = DMSDataset(os.path.join(data_dir, "mutation_combined_DMS_OLD_train.csv"), result_tag)
     train_data_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=False, num_workers=num_workers, pin_memory=True)
 
-    test_dataset = RBDDataset(os.path.join(data_dir, "spikeprot0528.clean.uniq.noX.RBD.metadata.variants_test.csv"))
+    test_dataset = DMSDataset(os.path.join(data_dir, "mutation_combined_DMS_OLD_test.csv"), result_tag)
     test_data_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, drop_last=False, num_workers=num_workers, pin_memory=True)
 
     # BERT input
@@ -240,15 +298,34 @@ if __name__=='__main__':
     dropout = 0.1
     n_transformer_layers = 12
     n_attn_heads = 10
-
     bert = BERT(embedding_dim, dropout, max_len, mask_prob, n_transformer_layers, n_attn_heads)
+    bert.embedding.load_pretrained_embeddings(os.path.join(data_dir, '../rbd/esm_weights-embedding_dim320.pth'), no_grad=False)
     tokenizer = ProteinTokenizer(max_len, mask_prob)
 
-    model = ProteinLM(bert, vocab_size=len(token_to_index))
+    # BLSTM input
+    size = 320
+    lstm_input_size = size
+    lstm_hidden_size = size
+    lstm_num_layers = 1        
+    lstm_bidrectional = True   
+    fcn_hidden_size = size
+    fcn_num_layers = 1
+    blstm = BLSTM(lstm_input_size, lstm_hidden_size, lstm_num_layers, lstm_bidrectional, fcn_hidden_size, fcn_num_layers)
+
+    # BERT-BLSTM input
+    bert_model_pth = os.path.join(results_dir, "../bert_mlm-esm_init/bert_mlm-esm_init-RBD-2024-09-25_20-29/best_saved_model.pth")
+    saved_state = torch.load(bert_model_pth, map_location=device, weights_only=False)
+    model_state = saved_state['model_state_dict']
+    bert_state_dict = {key[len('bert.'):]: value for key, value in model_state.items() if key.startswith('bert.')}
+    mlm_state_dict = {key[len('mlm.'):]: value for key, value in model_state.items() if key.startswith('mlm.')}
+
+    bert.load_state_dict(bert_state_dict)
+    model = BERT_BLSTM(bert, blstm, len(token_to_index))
+    model.mlm.load_state_dict(mlm_state_dict)
 
     # Run
     count_parameters(model)
     saved_model_pth = None
     from_checkpoint = False
-    save_as = f"bert_mlm-RBD-train_{len(train_dataset)}_test_{len(test_dataset)}"
+    save_as = f"bert_blstm-DMS_OLD-train_{len(train_dataset)}_test_{len(test_dataset)}"
     run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs, lr, max_batch, device, run_dir, save_as, saved_model_pth, from_checkpoint)

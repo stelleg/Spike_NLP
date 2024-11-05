@@ -38,7 +38,8 @@ class BLSTM(nn.Module):
                  lstm_hidden_size,   # The number of features in hidden state h.
                  lstm_num_layers,    # Number of recurrent layers in LSTM.
                  lstm_bidirectional, # Bidrectional LSTM.
-                 fcn_hidden_size):   # The number of features in hidden layer of CN.
+                 fcn_hidden_size,    # The number of features in hidden layer of CN.
+                 fcn_num_layers):    # The number of fcn layers
         super().__init__()
 
         # LSTM layer
@@ -48,13 +49,16 @@ class BLSTM(nn.Module):
                             bidirectional=lstm_bidirectional,
                             batch_first=True)           
 
-        # FCN
-        if lstm_bidirectional:
-            self.fcn = nn.Sequential(nn.Linear(2 * lstm_hidden_size, fcn_hidden_size),
-                                     nn.ReLU())
-        else:
-            self.fcn = nn.Sequential(nn.Linear(lstm_hidden_size, fcn_hidden_size),
-                                     nn.ReLU())
+        # FCN layer(s)
+        layers = []
+        input_size = 2 * lstm_hidden_size if lstm_bidirectional else lstm_hidden_size
+
+        for _ in range(fcn_num_layers):
+            layers.append(nn.Linear(input_size, fcn_hidden_size))
+            layers.append(nn.ReLU())
+            input_size = fcn_hidden_size
+
+        self.fcn = nn.Sequential(*layers)
 
         # FCN output layers - two separate heads for binding and expression
         self.binding_head = nn.Linear(fcn_hidden_size, 1)
@@ -87,7 +91,6 @@ class ESM_BLSTM(nn.Module):
             esm_aa_embedding = esm_last_hidden_state[:, 1:-1, :] # Amino Acid-level representations, [batch_size, sequence_length-2, embedding_dim], excludes 1st and last tokens
             binding_preds, expression_preds = self.blstm(esm_aa_embedding)
         return binding_preds, expression_preds
-
 
 # MODEL RUNNING
 def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: int, lr:float, max_batch: Union[int, None], device: str, run_dir: str, save_as: str, saved_model_pth:str=None, from_checkpoint:bool=False):
@@ -244,12 +247,12 @@ if __name__=='__main__':
     os.makedirs(run_dir, exist_ok = True)
 
     # Run setup
-    n_epochs = 5000
+    n_epochs = 1000
     batch_size = 64
     max_batch = -1
     num_workers = 64
     lr = 1e-5
-    device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Create Dataset and DataLoader
     torch.manual_seed(0)
@@ -272,7 +275,8 @@ if __name__=='__main__':
     lstm_num_layers = 1        
     lstm_bidrectional = True   
     fcn_hidden_size = size
-    blstm = BLSTM(lstm_input_size, lstm_hidden_size, lstm_num_layers, lstm_bidrectional, fcn_hidden_size)
+    fcn_num_layers = 5
+    blstm = BLSTM(lstm_input_size, lstm_hidden_size, lstm_num_layers, lstm_bidrectional, fcn_hidden_size, fcn_num_layers)
 
     model = ESM_BLSTM(esm, blstm)
 

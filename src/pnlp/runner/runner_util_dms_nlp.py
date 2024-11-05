@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 """
 Model runner utility for the following models:
-    - esm_blstm-DMS_OLD.py
-    - esm_blstm-DMS_OLD_BE.py
-    - esm-fcn-DMS_OLD.py
-    - esm_fcn-DMS_OLD_BE.py
+    - bert_blstm-DMS_OLD.py
+    - bert_blstm-DMS_OLD_BE.py
+    - bert-fcn-DMS_OLD.py
+    - bert-fcn-DMS_OLD_BE.py
 
 These models utilize the DMS datasets.
 """
@@ -94,11 +94,12 @@ def count_parameters(model):
     print(f"Total Trainable Params: {total_params}\n")
     return total_params
 
-def save_model(model, optimizer, path_to_pth, epoch, loss):
+def save_model(model, optimizer, path_to_pth, epoch, accuracy, loss):
     torch.save({
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
         'epoch': epoch,
+        'accuracy': accuracy,
         'loss': loss
     }, path_to_pth)
     print(f"Model, optimizer, state saved to {path_to_pth}")
@@ -110,10 +111,11 @@ def load_model(saved_model_pth, device):
     optimizer_state = saved_state['optimizer_state_dict']
 
     epoch = saved_state['epoch']
+    accuracy = saved_state['accuracy']
     loss = saved_state['loss']
 
-    print(f"Loaded in model from {saved_model_pth}, saved at epoch {epoch}, rmse loss {loss}")
-    return model_state, optimizer_state, epoch, loss
+    print(f"Loaded in model from {saved_model_pth}, saved at epoch {epoch}, accuracy {accuracy}, rmse loss {loss}")
+    return model_state, optimizer_state, epoch, accuracy, loss
 
 def load_model_checkpoint(path_to_pth, metrics_csv, starting_epoch):
     """ Load model data csv, and model pth. """
