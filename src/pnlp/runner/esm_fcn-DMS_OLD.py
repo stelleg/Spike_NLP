@@ -56,8 +56,8 @@ class FCN(nn.Module):
 
     def forward(self, x):
         fcn_out = self.fcn(x)
-        prediction = self.out(fcn_out)  # [batch_size, 1]
-
+        prediction = self.out(fcn_out).squeeze(1)  # [batch_size]
+        
         return prediction
 
 # ESM-FCN
@@ -71,7 +71,7 @@ class ESM_FCN(nn.Module):
         with torch.set_grad_enabled(self.training):  # Enable gradients, managed by model.eval() or model.train() in epoch_iteration
             esm_last_hidden_state = self.esm(**tokenized_seqs).last_hidden_state # shape: [batch_size, sequence_length, embedding_dim]
             esm_cls_embedding = esm_last_hidden_state[:, 0, :]  # CLS token embedding (sequence-level representations), [batch_size, embedding_dim]
-            output = self.fcn(esm_cls_embedding).squeeze(1) # [batch_size]
+            output = self.fcn(esm_cls_embedding)
         return output
 
 # MODEL RUNNING

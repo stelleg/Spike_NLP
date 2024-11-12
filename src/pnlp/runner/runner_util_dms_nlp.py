@@ -134,22 +134,34 @@ def load_model_checkpoint(path_to_pth, metrics_csv, starting_epoch):
                 break
             fb.write(line)
 
-def plot_log_file(metrics_csv, metrics_img):
+def plot_log_file(metrics_csv, metrics_img, rmse_model):
     df = pd.read_csv(metrics_csv)
 
     sns.set_theme(style="darkgrid")
-    plt.subplots(figsize=(16, 9))
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 18))  # 2 rows, 1 column
     fontsize = 28
 
     # Plot Loss
-    plt.plot(df['Epoch'], df['Test RMSE'], label='Test RMSE', color='tab:blue', linewidth=3)
-    plt.plot(df['Epoch'], df['Train RMSE'], label='Train RMSE', color='tab:orange', linewidth=3)
+    ax1.plot(df['Epoch'], df['Test MLM Loss'], label='Test MLM Loss', color='tab:orange', linestyle='dashed', linewidth=3)
+    ax1.plot(df['Epoch'], df['Train MLM Loss'], label='Train MLM Loss', color='tab:red', linestyle='dashed', linewidth=3)
+    ax1.plot(df['Epoch'], df[f'Test {rmse_model} RMSE'], label=f'Test {rmse_model} RMSE Loss', color='tab:orange', linestyle='dashdot', linewidth=3)
+    ax1.plot(df['Epoch'], df[f'Train {rmse_model} RMSE'], label=f'Train {rmse_model} RMSE Loss', color='tab:red', linestyle='dashdot', linewidth=3)
+    ax1.plot(df['Epoch'], df['Test Loss'], label='Test Loss', color='tab:orange', linewidth=3)
+    ax1.plot(df['Epoch'], df['Train Loss'], label='Train Loss', color='tab:red', linewidth=3)
+    ax1.tick_params(axis='x', labelsize=fontsize)
+    ax1.set_ylabel('Loss', fontsize=fontsize)
+    ax1.tick_params(axis='y', labelsize=fontsize)
+    ax1.legend(loc='upper right', fontsize=fontsize)
 
-    plt.xlabel('Epochs', fontsize=fontsize)
-    plt.xticks(fontsize=fontsize)
-    plt.ylabel('RMSE', fontsize=fontsize)
-    plt.yticks(fontsize=fontsize)
-    plt.legend(loc='upper right', fontsize=fontsize)
+    # Plot Accuracy
+    ax2.plot(df['Epoch'], df['Test MLM Accuracy'], label='Test MLM Accuracy', color='tab:green', linewidth=3)
+    ax2.plot(df['Epoch'], df['Train MLM Accuracy'], label='Train MLM Accuracy', color='tab:blue', linewidth=3)
+    ax2.set_xlabel('Epochs', fontsize=fontsize)
+    ax2.tick_params(axis='x', labelsize=fontsize)
+    ax2.set_ylabel('Accuracy', fontsize=fontsize)
+    ax2.tick_params(axis='y', labelsize=fontsize)
+    ax2.set_ylim(0, 100) 
+    ax2.legend(loc='lower right', fontsize=fontsize)
 
     plt.tight_layout()
     plt.savefig(metrics_img, format='pdf')

@@ -75,9 +75,9 @@ class BLSTM(nn.Module):
         lstm_out, (h_n, c_n) = self.lstm(x, (h_0, c_0))
         lstm_final_out = lstm_out[:, -1, :]
         fcn_out = self.fcn(lstm_final_out)
-        prediction = self.out(fcn_out)  # [batch_size, 1]
+        prediction = self.out(fcn_out).squeeze(1)  # [batch_size]
 
-        return prediction.squeeze(1)
+        return prediction
 
 # MODEL RUNNING
 def run_model(model, tokenizer, embedder, train_data_loader, test_data_loader, n_epochs: int, lr:float, max_batch: Union[int, None], device: str, run_dir: str, save_as: str, saved_model_pth:str=None, from_checkpoint:bool=False):

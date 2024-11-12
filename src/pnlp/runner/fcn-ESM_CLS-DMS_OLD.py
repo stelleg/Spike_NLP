@@ -56,9 +56,9 @@ class FCN(nn.Module):
 
     def forward(self, x):
         fcn_out = self.fcn(x)
-        prediction = self.out(fcn_out)  # [batch_size, 1]
-
-        return prediction.squeeze(1)
+        prediction = self.out(fcn_out).squeeze(1)  # [batch_size]
+        
+        return prediction
     
 class ESM(nn.Module):
     def __init__(self, esm):

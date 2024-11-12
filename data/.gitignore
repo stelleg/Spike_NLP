@@ -6,3 +6,5 @@ rbd/parquets
 rbd/spikeprot0528.clean.uniq.noX.RBD.metadata.variants.ADO.csv
 
 alphaseq/MITLL_AAlphaBio_Ab_Binding_dataset.csv
+
+dms/parquets

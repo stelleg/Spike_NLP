@@ -74,9 +74,9 @@ class BLSTM(nn.Module):
         lstm_out, (h_n, c_n) = self.lstm(x, (h_0, c_0))
         lstm_final_out = lstm_out[:, -1, :]
         fcn_out = self.fcn(lstm_final_out)
-        prediction = self.out(fcn_out)  # [batch_size, 1]
+        prediction = self.out(fcn_out).squeeze(1)  # [batch_size]
 
-        return prediction.squeeze(1)
+        return prediction
 
 # ESM-BLSTM
 class ESM_BLSTM(nn.Module):
