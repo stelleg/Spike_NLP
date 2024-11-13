@@ -9,22 +9,15 @@ Model runner utility for the following models:
 These models utilize the DMS datasets.
 """
 import os
-import re
 import sys
-import math
-import tqdm
-import time
 import torch
-import datetime
 import numpy as np
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
-from torch import nn
-from torch.utils.data import Dataset, DataLoader
-from typing import Union
+from torch.utils.data import Dataset
 from prettytable import PrettyTable
-from collections import defaultdict
+import pyarrow.parquet as pq
 
 # DATASET    
 class DMSDataset(Dataset):
@@ -74,6 +67,78 @@ class DMSDataset_BE(Dataset):
     def __getitem__(self, idx):
         # label, seq, binding target, expression target
         return self.full_df['label'][idx], self.full_df['sequence'][idx], self.full_df['ACE2-binding_affinity'][idx], self.full_df['RBD_expression'][idx]
+    
+# DATASET FOR PREEMBEDDED
+class DMSEmbeddedDataset(Dataset):
+    """ Binding or Expression DMS Embedded Dataset, single target. """
+    
+    def __init__(self, parquet_file:str, result_tag:str):
+        """
+        Load from parquet file into pandas:
+        - sequence label ('labels'), 
+        - 'embedding',
+        - binding or expression target,
+        """
+        try:
+            parquet_file = pq.ParquetFile(parquet_file)
+            chunks = []
+
+            # Read and process the file in batches
+            for batch in parquet_file.iter_batches(batch_size=1000):  # Adjust batch size as needed
+                # Convert the batch to a Pandas DataFrame and append to the list
+                chunk_df = batch.to_pandas()
+                chunks.append(chunk_df)
+
+            # Combine all chunks into a single DataFrame
+            self.full_df = pd.concat(chunks, ignore_index=True)
+
+            self.target = 'ACE2-binding_affinity' if 'binding' in result_tag else 'RBD_expression'
+            
+        except (FileNotFoundError, pd.errors.ParserError, Exception) as e:
+            print(f"Error reading in .parquet file: {parquet_file}\n{e}", file=sys.stderr)
+            sys.exit(1)
+
+    def __len__(self) -> int:
+        return len(self.full_df)
+
+    def __getitem__(self, idx):
+        # label, embedding, target
+        return self.full_df['label'][idx], torch.tensor(np.vstack(np.array(self.full_df['embedding'][idx]))).squeeze(), self.full_df[self.target][idx]
+    
+class DMSEmbeddedDataset_BE(Dataset):
+    """ Binding and Expression DMS Embedded Dataset, multi target. """
+    
+    def __init__(self, parquet_file:str):
+        """
+        Load from parquet file into pandas:
+        - sequence label ('labels'), 
+        - 'embedding',
+        - binding target,
+        - expression target
+        """
+        try:
+            parquet_file = pq.ParquetFile(parquet_file)
+            
+            chunks = []
+            # Read and process the file in batches
+            for batch in parquet_file.iter_batches(batch_size=1000):  # Adjust batch size as needed
+                # Convert the batch to a Pandas DataFrame and append to the list
+                chunk_df = batch.to_pandas()
+                chunks.append(chunk_df)
+
+            # Combine all chunks into a single DataFrame
+            self.full_df = pd.concat(chunks, ignore_index=True)
+
+        except (FileNotFoundError, pd.errors.ParserError, Exception) as e:
+            print(f"Error reading in .parquet file: {parquet_file}\n{e}", file=sys.stderr)
+            sys.exit(1)
+
+    def __len__(self) -> int:
+        return len(self.full_df)
+
+    def __getitem__(self, idx):
+        # label, embedding, binding target, expression target
+        return self.full_df['label'][idx], torch.tensor(np.vstack(np.array(self.full_df['embedding'][idx]))).squeeze(), self.full_df['ACE2-binding_affinity'][idx], self.full_df['RBD_expression'][idx]
 
 # HELPER FUNCTIONS
 def count_parameters(model):

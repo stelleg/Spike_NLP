@@ -9,22 +9,13 @@ Model runner utility for the following models:
 These models utilize the DMS datasets.
 """
 import os
-import re
 import sys
-import math
-import tqdm
-import time
 import torch
-import datetime
-import numpy as np
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
-from torch import nn
-from torch.utils.data import Dataset, DataLoader
-from typing import Union
+from torch.utils.data import Dataset
 from prettytable import PrettyTable
-from collections import defaultdict
 
 # DATASET    
 class DMSDataset(Dataset):

@@ -5,24 +5,16 @@ This one loads in from parquet of preembedded sequences. This does not work for
 other embeddings because of crashing.
 """
 import os
-import re
-import sys
-import math
 import tqdm
 import torch
 import time
 import datetime
 import numpy as np
-import pandas as pd
 from typing import Union
 from torch import nn
-from torch.utils.data import Dataset, DataLoader
-from transformers import AutoTokenizer, EsmModel, EsmConfig
-import seaborn as sns
-import matplotlib.pyplot as plt
-from prettytable import PrettyTable
+from torch.utils.data import DataLoader
 
-from runner_util_dms_esm import (
+from runner_util_dms import (
     DMSEmbeddedDataset_BE,
     count_parameters,
     save_model,

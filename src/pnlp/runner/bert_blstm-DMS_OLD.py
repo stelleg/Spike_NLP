@@ -3,21 +3,14 @@
 Model runner for BERT-BLSTM model, BERT pretrained from ESM initialized model.
 """
 import os
-import re
-import sys
-import math
 import tqdm
 import time
 import torch
 import datetime
 import numpy as np
-import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
 from torch import nn
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 from typing import Union
-from prettytable import PrettyTable
 from collections import defaultdict
 
 from pnlp.model.language import BERT, ProteinMaskedLanguageModel

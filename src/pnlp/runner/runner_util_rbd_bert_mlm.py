@@ -7,25 +7,14 @@ Model runner utility for the following BERT-MLM models:
 These models utilize the RBD dataset.
 """
 import os
-import re
 import sys
-import math
-import tqdm
-import time
 import torch
-import datetime
 import numpy as np
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
-from torch import nn
-from torch.utils.data import Dataset, DataLoader
-from typing import Union
+from torch.utils.data import Dataset
 from prettytable import PrettyTable
-from collections import defaultdict
-
-from pnlp.model.language import BERT, ProteinLM
-from pnlp.embedding.tokenizer import ProteinTokenizer, token_to_index
 
 # SCHEDULER FOR OPTIMIZER
 class ScheduledOptim():
