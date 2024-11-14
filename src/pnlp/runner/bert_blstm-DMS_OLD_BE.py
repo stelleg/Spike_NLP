@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
 Model runner for BERT-BLSTM model, BERT pretrained from ESM initialized model
-(single target).
+(multi target for both binding and expression).
 """
 import os
 import tqdm
@@ -17,12 +17,12 @@ from pnlp.model.language import BERT, ProteinMaskedLanguageModel
 from pnlp.embedding.tokenizer import ProteinTokenizer, token_to_index
 
 from runner_util_dms_bert_mlm import (
-    DMSDataset,
+    DMSDataset_BE,
     count_parameters,
     save_model,
     load_model,
     load_model_checkpoint,
-    plot_log_file,
+    plot_log_file_BE,
 )
 
 # BLSTM
@@ -56,23 +56,23 @@ class BLSTM(nn.Module):
 
         self.fcn = nn.Sequential(*layers)
 
-        # FCN output layer
-        self.out = nn.Linear(fcn_hidden_size, 1)
+        # FCN output layers - two separate heads for binding and expression
+        self.binding_head = nn.Linear(fcn_hidden_size, 1)
+        self.expression_head = nn.Linear(fcn_hidden_size, 1)
 
     def forward(self, x):
-        if x.dim() == 2:
-            x = x.unsqueeze(1)  # Add a sequence length dimension of 1, now [batch_size, sequence_length, features]
-
         num_directions = 2 if self.lstm.bidirectional else 1
         h_0 = torch.zeros(num_directions * self.lstm.num_layers, x.size(0), self.lstm.hidden_size, device=x.device)
         c_0 = torch.zeros(num_directions * self.lstm.num_layers, x.size(0), self.lstm.hidden_size, device=x.device)
-
         lstm_out, (h_n, c_n) = self.lstm(x, (h_0, c_0))
-        lstm_final_out = lstm_out[:, -1, :]
+        lstm_final_out = lstm_out[:, -1, :] 
         fcn_out = self.fcn(lstm_final_out)
-        prediction = self.out(fcn_out).squeeze(1)  # [batch_size]
 
-        return prediction
+        # Task-specific predictions
+        binding_pred = self.binding_head(fcn_out).squeeze(1) # [batch_size]
+        expression_pred = self.expression_head(fcn_out).squeeze(1) # [batch_size]
+
+        return binding_pred, expression_pred
 
 # BERT-BLSTM
 class BERT_BLSTM(nn.Module):
@@ -85,8 +85,8 @@ class BERT_BLSTM(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.bert(x)
         error_1 = self.mlm(x) # error from masked language
-        error_2 = self.blstm(x) # error from regession
-        return error_1, error_2
+        error_2_binding, error_2_expression = self.blstm(x) # error from regession
+        return error_1, error_2_binding, error_2_expression
 
 # MODEL RUNNING
 def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: int, lr:float, max_batch: Union[int, None], device: str, run_dir: str, save_as: str, saved_model_pth:str=None, from_checkpoint:bool=False):
@@ -127,6 +127,10 @@ def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: i
                 f"Epoch,"
                 f"Train MLM Accuracy,Test MLM Accuracy,"
                 f"Train MLM Loss,Test MLM Loss,"
+                f"Train BLSTM Binding MSE,Test BLSTM Binding MSE,"
+                f"Train BLSTM Binding RMSE,Test BLSTM Binding RMSE,"
+                f"Train BLSTM Expression MSE,Test BLSTM Expression MSE,"
+                f"Train BLSTM Expression RMSE,Test BLSTM Expression RMSE,"
                 f"Train BLSTM MSE,Test BLSTM MSE,"
                 f"Train BLSTM RMSE,Test BLSTM RMSE,"
                 f"Train Loss,Test Loss\n"
@@ -136,11 +140,13 @@ def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: i
     start_time = time.time()
 
     for epoch in range(starting_epoch, n_epochs + 1):
-        train_mlm_accuracy, train_mlm_loss, train_blstm_mse, train_blstm_rmse, train_loss = epoch_iteration(model, tokenizer, mlm_loss_fn, blstm_loss_fn, optimizer, train_data_loader, epoch, max_batch, device, mode='train')
-        test_mlm_accuracy, test_mlm_loss, test_blstm_mse, test_blstm_rmse, test_loss = epoch_iteration(model, tokenizer, mlm_loss_fn, blstm_loss_fn, optimizer, test_data_loader, epoch, max_batch, device, mode='test')
+        train_mlm_accuracy, train_mlm_loss, train_blstm_binding_mse, train_blstm_binding_rmse, train_blstm_expression_mse, train_blstm_expression_rmse, train_blstm_mse, train_blstm_rmse, train_loss = epoch_iteration(model, tokenizer, mlm_loss_fn, blstm_loss_fn, optimizer, train_data_loader, epoch, max_batch, device, mode='train')
+        test_mlm_accuracy, test_mlm_loss, test_blstm_binding_mse, test_blstm_binding_rmse, test_blstm_expression_mse, test_blstm_expression_rmse, test_blstm_mse, test_blstm_rmse, test_loss = epoch_iteration(model, tokenizer, mlm_loss_fn, blstm_loss_fn, optimizer, test_data_loader, epoch, max_batch, device, mode='test')
 
         print(f'Epoch {epoch} | Train MLM Accuracy: {train_mlm_accuracy:.4f}, Test MLM Accuracy: {test_mlm_accuracy:.4f}')
         print(f'{" "*(8+len(str(epoch)))} Train MLM Loss: {train_mlm_loss:.4f}, Test MLM Loss: {test_mlm_loss:.4f}')
+        print(f'{" "*(8+len(str(epoch)))} Train BLSTM Binding RMSE: {train_blstm_binding_rmse:.4f}, Test BLSTM Binding RMSE: {test_blstm_binding_rmse:.4f}')
+        print(f'{" "*(8+len(str(epoch)))} Train BLSTM Expression RMSE: {train_blstm_expression_rmse:.4f}, Test BLSTM Expression RMSE: {test_blstm_expression_rmse:.4f}')
         print(f'{" "*(8+len(str(epoch)))} Train BLSTM RMSE: {train_blstm_rmse:.4f}, Test BLSTM RMSE: {test_blstm_rmse:.4f}')
         print(f'{" "*(8+len(str(epoch)))} Train Loss: {train_loss:.4f}, Test Loss: {test_loss:.4f}\n')
         
@@ -149,6 +155,10 @@ def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: i
                 f"{epoch},"
                 f"{train_mlm_accuracy},{test_mlm_accuracy},"
                 f"{train_mlm_loss},{test_mlm_loss},"
+                f"{train_blstm_binding_mse},{test_blstm_binding_mse},"
+                f"{train_blstm_binding_rmse},{test_blstm_binding_rmse},"
+                f"{train_blstm_expression_mse},{test_blstm_expression_mse},"
+                f"{train_blstm_expression_rmse},{test_blstm_expression_rmse},"
                 f"{train_blstm_mse},{test_blstm_mse},"
                 f"{train_blstm_rmse},{test_blstm_rmse},"
                 f"{train_loss},{test_loss}\n"
@@ -174,7 +184,7 @@ def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: i
             
         print("")
 
-    plot_log_file(metrics_csv, metrics_img, "BLSTM")
+    plot_log_file_BE(metrics_csv, metrics_img, "BLSTM")
 
     # End timer and print duration
     end_time = time.time()
@@ -193,7 +203,7 @@ def epoch_iteration(model, tokenizer, mlm_loss_fn, blstm_loss_fn, optimizer, dat
                           bar_format='{l_bar}{r_bar}')
     
     total_mlm_loss = 0
-    total_blstm_loss = 0
+    total_blstm_binding_loss, total_blstm_expression_loss, total_blstm_loss = 0, 0, 0
     total_loss = 0
     total_masked = 0
     total_items = 0
@@ -207,32 +217,38 @@ def epoch_iteration(model, tokenizer, mlm_loss_fn, blstm_loss_fn, optimizer, dat
         if max_batch > 0 and batch >= max_batch:
             break
 
-        seq_ids, seqs, targets = batch_data
-        targets = targets.to(device).float()
+        seq_ids, seqs, binding_targets, expression_targets = batch_data
+        binding_targets, expression_targets = binding_targets.to(device).float(), expression_targets.to(device).float()
         masked_tokenized_seqs = tokenizer(seqs).to(device) 
         unmasked_tokenized_seqs = tokenizer._batch_pad(seqs).to(device)
    
         if mode == 'train':
             optimizer.zero_grad()
-            mlm_preds, blstm_preds = model(masked_tokenized_seqs)
+            mlm_preds, blstm_binding_preds, blstm_expression_preds = model(masked_tokenized_seqs)
             batch_mlm_loss = mlm_loss_fn(mlm_preds.transpose(1, 2), unmasked_tokenized_seqs)
-            batch_blstm_loss = blstm_loss_fn(blstm_preds, targets)
+            batch_blstm_binding_loss = blstm_loss_fn(blstm_binding_preds, binding_targets)
+            batch_blstm_expression_loss = blstm_loss_fn(blstm_expression_preds, expression_targets)
+            batch_blstm_loss = batch_blstm_binding_loss + batch_blstm_expression_loss
             batch_loss = (batch_mlm_loss * 0.1) + batch_blstm_loss 
             batch_loss.backward()
             optimizer.step()
 
         else:
             with torch.no_grad():
-                mlm_preds, blstm_preds = model(masked_tokenized_seqs)
+                mlm_preds, blstm_binding_preds, blstm_expression_preds = model(masked_tokenized_seqs)
                 batch_mlm_loss = mlm_loss_fn(mlm_preds.transpose(1, 2), unmasked_tokenized_seqs)
-                batch_blstm_loss = blstm_loss_fn(blstm_preds, targets)
-                batch_loss = (batch_mlm_loss * 0.1) + batch_blstm_loss
+                batch_blstm_binding_loss = blstm_loss_fn(blstm_binding_preds, binding_targets)
+                batch_blstm_expression_loss = blstm_loss_fn(blstm_expression_preds, expression_targets)
+                batch_blstm_loss = batch_blstm_binding_loss + batch_blstm_expression_loss
+                batch_loss = (batch_mlm_loss * 0.1) + batch_blstm_loss 
 
         # Loss
         total_mlm_loss += batch_mlm_loss.item()
+        total_blstm_binding_loss += batch_blstm_binding_loss.item()
+        total_blstm_expression_loss += batch_blstm_expression_loss.item()
         total_blstm_loss += batch_blstm_loss.item()
         total_loss += batch_loss.item()
-        total_items += targets.size(0)
+        total_items += binding_targets.size(0)
 
         # Accuracy
         predicted_tokens = torch.max(mlm_preds, dim=-1)[1]
@@ -245,25 +261,29 @@ def epoch_iteration(model, tokenizer, mlm_loss_fn, blstm_loss_fn, optimizer, dat
     avg_mlm_accuracy = (correct_predictions / total_masked) * 100
 
     # RMSE - BLSTM
+    blstm_binding_mse = total_blstm_binding_loss/total_items
+    blstm_expression_mse = total_blstm_expression_loss/total_items
     blstm_mse = total_blstm_loss/total_items
+
+    blstm_binding_rmse = np.sqrt(blstm_binding_mse)
+    blstm_expression_rmse = np.sqrt(blstm_expression_mse)
     blstm_rmse = np.sqrt(blstm_mse)
 
     # MLM + BLSTM Average loss per item
     avg_loss = total_loss / total_items
 
-    return avg_mlm_accuracy, avg_mlm_loss, blstm_mse, blstm_rmse, avg_loss
+    return avg_mlm_accuracy, avg_mlm_loss, blstm_binding_mse, blstm_binding_rmse, blstm_expression_mse, blstm_expression_rmse, blstm_mse, blstm_rmse, avg_loss
       
 if __name__=='__main__':
 
     # Data/results directories
-    result_tag = 'expression' # specify expression or binding
     data_dir = os.path.join(os.path.dirname(__file__), f'../../../data/dms')
     results_dir = os.path.join(os.path.dirname(__file__), f'../../../results/run_results/bert_blstm')
 
     # Create run directory for results
     now = datetime.datetime.now()
     date_hour_minute = now.strftime("%Y-%m-%d_%H-%M")
-    run_dir = os.path.join(results_dir, f"bert_blstm-DMS_OLD-{result_tag}-{date_hour_minute}")
+    run_dir = os.path.join(results_dir, f"bert_blstm_BE-DMS_OLD-{date_hour_minute}")
     os.makedirs(run_dir, exist_ok = True)
 
     # Run setup
@@ -272,15 +292,15 @@ if __name__=='__main__':
     max_batch = -1
     num_workers = 64
     lr = 1e-5
-    device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Create Dataset and DataLoader
     torch.manual_seed(0)
 
-    train_dataset = DMSDataset(os.path.join(data_dir, "mutation_combined_DMS_OLD_train.csv"), result_tag)
+    train_dataset = DMSDataset_BE(os.path.join(data_dir, "mutation_combined_DMS_OLD_train.csv"))
     train_data_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=False, num_workers=num_workers, pin_memory=True)
 
-    test_dataset = DMSDataset(os.path.join(data_dir, "mutation_combined_DMS_OLD_test.csv"), result_tag)
+    test_dataset = DMSDataset_BE(os.path.join(data_dir, "mutation_combined_DMS_OLD_test.csv"))
     test_data_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, drop_last=False, num_workers=num_workers, pin_memory=True)
 
     # BERT input
@@ -319,5 +339,5 @@ if __name__=='__main__':
     count_parameters(model)
     saved_model_pth = None
     from_checkpoint = False
-    save_as = f"bert_blstm-DMS_OLD-train_{len(train_dataset)}_test_{len(test_dataset)}"
+    save_as = f"bert_blstm_BE-DMS_OLD-train_{len(train_dataset)}_test_{len(test_dataset)}"
     run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs, lr, max_batch, device, run_dir, save_as, saved_model_pth, from_checkpoint)

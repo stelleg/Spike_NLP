@@ -103,7 +103,7 @@ class DMSEmbeddedDataset(Dataset):
 
     def __getitem__(self, idx):
         # label, embedding, target
-        return self.full_df['label'][idx], torch.tensor(np.vstack(np.array(self.full_df['embedding'][idx]))).squeeze(), self.full_df[self.target][idx]
+        return self.full_df['label'][idx], torch.tensor(np.vstack(np.array(self.full_df['embedding'][idx])), dtype=torch.float32).squeeze(1), self.full_df[self.target][idx]
     
 class DMSEmbeddedDataset_BE(Dataset):
     """ Binding and Expression DMS Embedded Dataset, multi target. """
@@ -138,7 +138,7 @@ class DMSEmbeddedDataset_BE(Dataset):
 
     def __getitem__(self, idx):
         # label, embedding, binding target, expression target
-        return self.full_df['label'][idx], torch.tensor(np.vstack(np.array(self.full_df['embedding'][idx]))).squeeze(), self.full_df['ACE2-binding_affinity'][idx], self.full_df['RBD_expression'][idx]
+        return self.full_df['label'][idx], torch.tensor(np.vstack(np.array(self.full_df['embedding'][idx])), dtype=torch.float32).squeeze(1), self.full_df['ACE2-binding_affinity'][idx], self.full_df['RBD_expression'][idx]
 
 # HELPER FUNCTIONS
 def count_parameters(model):
