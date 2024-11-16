@@ -77,7 +77,7 @@ def run_model(model, train_data_loader, test_data_loader, n_epochs: int, lr:floa
 
     model = model.to(device)
     loss_fn = nn.MSELoss(reduction='sum').to(device)
-    optimizer = torch.optim.SGD(model.parameters(), lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     metrics_csv = os.path.join(run_dir, f"{save_as}_metrics.csv")
     metrics_img = os.path.join(run_dir, f"{save_as}_metrics.pdf")

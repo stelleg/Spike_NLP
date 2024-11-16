@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
-Model runner for FCN model (single target).
-This one loads in from parquet of preembedded ESM CLS sequences.
+Model runner for BLSTM model (single target).
+This one loads in from parquet of preembedded ESM AA sequences. 
 """
 import os
 import tqdm
@@ -12,9 +12,14 @@ import numpy as np
 from typing import Union
 from torch import nn
 from torch.utils.data import DataLoader
+from transformers import AutoTokenizer, EsmModel
+
+from torch_geometric.nn import SAGEConv, global_mean_pool
+from torch_geometric.data import Data, Batch
+from torch_geometric.loader import DataLoader
 
 from runner_util_dms import (
-    DMSEmbeddedDataset,
+    DMSDataset,
     count_parameters,
     save_model,
     load_model,
@@ -22,36 +27,48 @@ from runner_util_dms import (
     plot_log_file,
 )
 
-class FCN(nn.Module):
-    """ Fully Connected Network """
+class GraphSAGE(nn.Module):
+    """ GraphSAGE. """
 
-    def __init__(self,
-                 fcn_input_size,    # The number of input features
-                 fcn_hidden_size,   # The number of features in hidden layer of FCN.
-                 fcn_num_layers):   # The number of fcn layers  
+    def __init__(self, input_channels, hidden_channels, output_channels):
+        super(GraphSAGE, self).__init__()
+        self.conv1 = SAGEConv(input_channels, hidden_channels)
+        self.conv2 = SAGEConv(hidden_channels, output_channels)
+
+    def forward(self, x, edge_index, batch):
+        x = self.conv1(x, edge_index).relu()
+        x = self.conv2(x, edge_index)
+        x = global_mean_pool(x, batch)
+        return x
+
+class ESM_GCN(nn.Module):
+    def __init__(self, esm, gcn):
         super().__init__()
+        self.esm = esm
+        self.gcn = gcn
 
-        # Creating a list of layers for the FCN
-        # Subsequent layers after 1st should be equal to hidden_size for input_size
-        layers = []
-        input_size = fcn_input_size
+    def forward(self, tokenized_seqs, targets):
+        with torch.set_grad_enabled(self.training):  # Enable gradients, managed by model.eval() or model.train() in epoch_iteration
+            esm_last_hidden_state = self.esm(**tokenized_seqs).last_hidden_state # shape: [batch_size, sequence_length, embedding_dim]
+            esm_aa_embedding = esm_last_hidden_state[:, 1:-1, :] # Amino Acid-level representations, [batch_size, sequence_length-2, embedding_dim], excludes 1st and last tokens
+            
+            # Graph Construction
+            graphs = []
+            for embedding, target in zip(esm_aa_embedding, targets):
+                edges = [(i, i+1) for i in range(embedding.size(0) - 1)]
+                edge_index = torch.tensor(edges, dtype=torch.int64).t().contiguous()
 
-        for _ in range(fcn_num_layers):
-            layers.append(nn.Linear(input_size, fcn_hidden_size))
-            layers.append(nn.ReLU())
-            input_size = fcn_hidden_size
+                graphs.append(Data(
+                    x=embedding, 
+                    edge_index=edge_index,
+                    y = target.view(-1, 1)
+                ))
+            batch_graph = Batch.from_data_list(graphs)
+            batch_graph = batch_graph.to(next(self.gcn.parameters()).device)
 
-        # FCN layers
-        self.fcn = nn.Sequential(*layers)
+            output = self.gcn(batch_graph.x, batch_graph.edge_index, batch_graph.batch)
 
-        # FCN output layer 
-        self.out = nn.Linear(fcn_hidden_size, 1)
-
-    def forward(self, x):
-        fcn_out = self.fcn(x)
-        prediction = self.out(fcn_out).squeeze(1)  # [batch_size, 1]
-
-        return prediction
+        return output, batch_graph.y
 
 # MODEL RUNNING
 def run_model(model, train_data_loader, test_data_loader, n_epochs: int, lr:float, max_batch: Union[int, None], device: str, run_dir: str, save_as: str, saved_model_pth:str=None, from_checkpoint:bool=False):
@@ -59,7 +76,7 @@ def run_model(model, train_data_loader, test_data_loader, n_epochs: int, lr:floa
 
     model = model.to(device)
     loss_fn = nn.MSELoss(reduction='sum').to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    optimizer = torch.optim.SGD(model.parameters(), lr)
 
     metrics_csv = os.path.join(run_dir, f"{save_as}_metrics.csv")
     metrics_img = os.path.join(run_dir, f"{save_as}_metrics.pdf")
@@ -147,20 +164,21 @@ def epoch_iteration(model, loss_fn, optimizer, data_loader, epoch, max_batch, de
         if max_batch > 0 and batch >= max_batch:
             break
 
-        seq_ids, embeddings, targets = batch_data
-        embeddings, targets = embeddings.to(device), targets.to(device).float()
+        seq_ids, seqs, targets = batch_data
+        targets = targets.to(device).float()
+        tokenized_seqs = tokenizer(seqs, return_tensors="pt").to(device)
    
         if mode == 'train':
             optimizer.zero_grad()
-            preds = model(embeddings)
-            batch_loss = loss_fn(preds, targets)
+            preds, y = model(tokenized_seqs, targets)
+            batch_loss = loss_fn(preds, y)
             batch_loss.backward()
             optimizer.step()
 
         else:
             with torch.no_grad():
-                preds = model(embeddings)
-                batch_loss = loss_fn(preds, targets)
+                preds, y = model(tokenized_seqs, targets)
+                batch_loss = loss_fn(preds, y)
 
         total_loss += batch_loss.item()
         total_items += targets.size(0)
@@ -178,41 +196,48 @@ if __name__=='__main__':
     # Data/results directories
     result_tag = 'binding' # specify expression or binding
     data_dir = os.path.join(os.path.dirname(__file__), f'../../../data/dms') 
-    results_dir = os.path.join(os.path.dirname(__file__), f'../../../results/run_results/fcn-ESM_CLS_preembedded')
+    results_dir = os.path.join(os.path.dirname(__file__), f'../../../results/run_results/esm-gcn')
 
     # Create run directory for results
     now = datetime.datetime.now()
     date_hour_minute = now.strftime("%Y-%m-%d_%H-%M")
-    run_dir = os.path.join(results_dir, f"fcn-ESM_CLS_preembedded-DMS_OLD-{result_tag}-{date_hour_minute}")
+    run_dir = os.path.join(results_dir, f"esm-gcn-DMS_OLD-{result_tag}-{date_hour_minute}")
     os.makedirs(run_dir, exist_ok = True)
 
     # Run setup
-    n_epochs = 1000
+    n_epochs = 2
     batch_size = 64
     max_batch = -1
     num_workers = 64
     lr = 1e-5
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
 
     # Create Dataset and DataLoader
     torch.manual_seed(0)
 
-    train_dataset = DMSEmbeddedDataset(os.path.join(data_dir, "parquets/mutation_combined_DMS_OLD_train_ESM-CLS-embedded.parquet"), result_tag)
+    train_dataset = DMSDataset(os.path.join(data_dir, "mutation_combined_DMS_OLD_train.csv"), result_tag)
     train_data_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=False, num_workers=num_workers, pin_memory=True)
 
-    test_dataset = DMSEmbeddedDataset(os.path.join(data_dir, "parquets/mutation_combined_DMS_OLD_test_ESM-CLS-embedded.parquet"), result_tag)
+    test_dataset = DMSDataset(os.path.join(data_dir, "mutation_combined_DMS_OLD_test.csv"), result_tag)
     test_data_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, drop_last=False, num_workers=num_workers, pin_memory=True)
 
-    # FCN input
+    # ESM input
+    esm_version = "facebook/esm2_t6_8M_UR50D" 
+    esm = EsmModel.from_pretrained(esm_version, cache_dir='../../../../model_downloads').to(device)
+    tokenizer = AutoTokenizer.from_pretrained(esm_version, cache_dir='../../../../model_downloads')
+
+    # GraphSAGE input
     size = 320
-    fcn_input_size = size  
-    fcn_hidden_size = size
-    fcn_num_layers = 5
-    model = FCN(fcn_input_size, fcn_hidden_size, fcn_num_layers)
+    input_channels = size # Number of input channels (dimensions of the embeddings)
+    hidden_channels = size
+    out_channels = 1  # For regression output
+    gcn = GraphSAGE(input_channels, hidden_channels, out_channels)
+
+    model = ESM_GCN(esm, gcn)
 
     # Run
     count_parameters(model)
     saved_model_pth = None
     from_checkpoint = False
-    save_as = f"fcn-ESM_CLS_preembedded-DMS_OLD_{result_tag}-train_{len(train_dataset)}_test_{len(test_dataset)}"
+    save_as = f"esm-gcn-DMS_OLD_{result_tag}-train_{len(train_dataset)}_test_{len(test_dataset)}"
     run_model(model, train_data_loader, test_data_loader, n_epochs, lr, max_batch, device, run_dir, save_as, saved_model_pth, from_checkpoint)

@@ -3,6 +3,4 @@
 **/*-epoch_[2-9][0-9][0-9][0-9].pth
 
 ddp
-
-# temp
-esm_gcn
+old_preembed
