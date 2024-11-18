@@ -186,12 +186,12 @@ if __name__=='__main__':
     os.makedirs(run_dir, exist_ok = True)
 
     # Run setup
-    n_epochs = 2
+    n_epochs = 1000
     batch_size = 64
     max_batch = -1
     num_workers = 64
     lr = 1e-5
-    device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Create Dataset and DataLoader
     torch.manual_seed(0)

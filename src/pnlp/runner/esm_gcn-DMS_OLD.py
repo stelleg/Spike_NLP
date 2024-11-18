@@ -196,12 +196,12 @@ if __name__=='__main__':
     # Data/results directories
     result_tag = 'binding' # specify expression or binding
     data_dir = os.path.join(os.path.dirname(__file__), f'../../../data/dms') 
-    results_dir = os.path.join(os.path.dirname(__file__), f'../../../results/run_results/esm-gcn')
+    results_dir = os.path.join(os.path.dirname(__file__), f'../../../results/run_results/esm_gcn')
 
     # Create run directory for results
     now = datetime.datetime.now()
     date_hour_minute = now.strftime("%Y-%m-%d_%H-%M")
-    run_dir = os.path.join(results_dir, f"esm-gcn-DMS_OLD-{result_tag}-{date_hour_minute}")
+    run_dir = os.path.join(results_dir, f"esm_gcn-DMS_OLD-{result_tag}-{date_hour_minute}")
     os.makedirs(run_dir, exist_ok = True)
 
     # Run setup
@@ -239,5 +239,5 @@ if __name__=='__main__':
     count_parameters(model)
     saved_model_pth = None
     from_checkpoint = False
-    save_as = f"esm-gcn-DMS_OLD_{result_tag}-train_{len(train_dataset)}_test_{len(test_dataset)}"
+    save_as = f"esm_gcn-DMS_OLD_{result_tag}-train_{len(train_dataset)}_test_{len(test_dataset)}"
     run_model(model, train_data_loader, test_data_loader, n_epochs, lr, max_batch, device, run_dir, save_as, saved_model_pth, from_checkpoint)
