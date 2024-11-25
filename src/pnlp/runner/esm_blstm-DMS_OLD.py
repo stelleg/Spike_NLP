@@ -91,7 +91,8 @@ def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: i
 
     model = model.to(device)
     loss_fn = nn.MSELoss(reduction='sum').to(device)
-    optimizer = torch.optim.SGD(model.parameters(), lr)
+    #optimizer = torch.optim.SGD(model.parameters(), lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     metrics_csv = os.path.join(run_dir, f"{save_as}_metrics.csv")
     metrics_img = os.path.join(run_dir, f"{save_as}_metrics.pdf")
@@ -216,7 +217,7 @@ if __name__=='__main__':
     # Create run directory for results
     now = datetime.datetime.now()
     date_hour_minute = now.strftime("%Y-%m-%d_%H-%M")
-    run_dir = os.path.join(results_dir, f"esm_blstm-DMS_OLD-{result_tag}-{date_hour_minute}")
+    run_dir = os.path.join(results_dir, f"adam.lr1e-5.esm_blstm-DMS_OLD-{result_tag}-{date_hour_minute}")
     os.makedirs(run_dir, exist_ok = True)
 
     # Run setup
@@ -225,7 +226,7 @@ if __name__=='__main__':
     max_batch = -1
     num_workers = 64
     lr = 1e-5
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:7" if torch.cuda.is_available() else "cpu")
 
     # Create Dataset and DataLoader
     torch.manual_seed(0)
