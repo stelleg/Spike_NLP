@@ -6,3 +6,8 @@
 !bert_mlm/**/saved_model-epoch_100.pth
 !bert_mlm-esm_init/**/saved_model-epoch_100.pth
 
+# Files are too big for github
+esm_blstm/adam.lr1e-4.esm_blstm-DMS_OLD-binding-2024-11-26_08-29/*.pth
+esm_blstm/adam.lr1e-4.esm_blstm-DMS_OLD-expression-2024-11-26_08-28/*.pth
+esm_blstm/adam.lr1e-5.esm_blstm-DMS_OLD-binding-2024-11-23_22-05/*.pth
+esm_blstm/adam.lr1e-5.esm_blstm-DMS_OLD-expression-2024-11-26_01-54/*.pth
