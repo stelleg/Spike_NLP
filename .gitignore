@@ -136,3 +136,6 @@ dmypy.json
 
 # bash files
 *.sh
+
+# comparison zoom
+results/plots/model_comparisons/finetuning/*zoom.*

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
-Model runner for BERT-BLSTM model, BERT pretrained from ESM initialized model
-(single target).
+Model runner for BERT-BLSTM model, (single target).
+BERT weights initialized with finetuned BERT_MLM-ESM_INIT weights.
 """
 import os
 import tqdm

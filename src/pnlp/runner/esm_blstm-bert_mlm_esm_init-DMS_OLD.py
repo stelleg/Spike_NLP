@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 """
 Model runner for ESM-BLSTM model (single target).
+ESM weights initialized with finetuned BERT_MLM-ESM_INIT weights.
 """
 import os
 import tqdm
@@ -97,8 +98,8 @@ def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: i
 
     model = model.to(device)
     loss_fn = nn.MSELoss(reduction='sum').to(device)
-    #optimizer = torch.optim.SGD(model.parameters(), lr)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    optimizer = torch.optim.SGD(model.parameters(), lr)
+    #optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     metrics_csv = os.path.join(run_dir, f"{save_as}_metrics.csv")
     metrics_img = os.path.join(run_dir, f"{save_as}_metrics.pdf")
@@ -261,7 +262,7 @@ if __name__=='__main__':
     # Load NLP weights from BERT model
     bert_model_pth = "../../../results/run_results/bert_mlm-esm_init/bert_mlm-esm_init-RBD-2024-09-25_20-29/best_saved_model.pth"
     saved_state = torch.load(bert_model_pth, map_location=device, weights_only=False)
-    embedding_weights = saved_state ['model_state_dict']['bert.embedding.token_embedding.weight']
+    embedding_weights = saved_state['model_state_dict']['bert.embedding.token_embedding.weight']
     model = ESM_BLSTM(esm, blstm, embedding_weights)
 
     # Run
