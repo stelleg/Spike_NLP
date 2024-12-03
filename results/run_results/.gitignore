@@ -11,3 +11,5 @@ esm_blstm/adam.lr1e-4.esm_blstm-DMS_OLD-binding-2024-11-26_08-29/*.pth
 esm_blstm/adam.lr1e-4.esm_blstm-DMS_OLD-expression-2024-11-26_08-28/*.pth
 esm_blstm/adam.lr1e-5.esm_blstm-DMS_OLD-binding-2024-11-23_22-05/*.pth
 esm_blstm/adam.lr1e-5.esm_blstm-DMS_OLD-expression-2024-11-26_01-54/*.pth
+esm_blstm-bert_mlm_esm_init/re.adam.lr1e-5.esm_blstm-bert_mlm_esm_init-DMS_OLD-binding-2024-11-27_16-59/*.pth
+esm_blstm-bert_mlm_esm_init/re.adam.lr1e-5.esm_blstm-bert_mlm_esm_init-DMS_OLD-expression-2024-11-27_16-58/*.pth
