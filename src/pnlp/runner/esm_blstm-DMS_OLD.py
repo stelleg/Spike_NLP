@@ -225,7 +225,7 @@ if __name__=='__main__':
     n_epochs = 1000
     batch_size = 64
     max_batch = -1
-    num_workers = 64
+    num_workers = 4
     lr = 1e-5
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
