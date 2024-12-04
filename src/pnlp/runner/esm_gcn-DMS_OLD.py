@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 """
-Model runner for BLSTM model (single target).
-This one loads in from parquet of preembedded ESM AA sequences. 
+Model runner for ESM-BLSTM model (single target).
 """
 import os
 import tqdm

@@ -72,73 +72,50 @@ class DMSDataset_BE(Dataset):
 class DMSEmbeddedDataset(Dataset):
     """ Binding or Expression DMS Embedded Dataset, single target. """
     
-    def __init__(self, parquet_file:str, result_tag:str):
+    def __init__(self, tensor_file:str, result_tag:str):
         """
-        Load from parquet file into pandas:
+        Load from tensor file into pandas:
         - sequence label ('labels'), 
         - 'embedding',
-        - binding or expression target,
+        - binding target or expression target
         """
         try:
-            parquet_file = pq.ParquetFile(parquet_file)
-            chunks = []
-
-            # Read and process the file in batches
-            for batch in parquet_file.iter_batches(batch_size=1000):  # Adjust batch size as needed
-                # Convert the batch to a Pandas DataFrame and append to the list
-                chunk_df = batch.to_pandas()
-                chunks.append(chunk_df)
-
-            # Combine all chunks into a single DataFrame
-            self.full_df = pd.concat(chunks, ignore_index=True)
-
+            self.data = torch.load(tensor_file)
             self.target = 'ACE2-binding_affinity' if 'binding' in result_tag else 'RBD_expression'
-            
-        except (FileNotFoundError, pd.errors.ParserError, Exception) as e:
-            print(f"Error reading in .parquet file: {parquet_file}\n{e}", file=sys.stderr)
+        except (FileNotFoundError, KeyError, Exception) as e:
+            print(f"Error reading the tensor file: {tensor_file}\n{e}", file=sys.stderr)
             sys.exit(1)
 
     def __len__(self) -> int:
-        return len(self.full_df)
+        return len(self.data['label'])
 
     def __getitem__(self, idx):
-        # label, embedding, target
-        return self.full_df['label'][idx], torch.tensor(np.vstack(np.array(self.full_df['embedding'][idx])), dtype=torch.float32).squeeze(1), self.full_df[self.target][idx]
+        # label, seq, target
+        return self.data['label'][idx], self.data['embedding'][idx], self.data[self.target][idx]
     
 class DMSEmbeddedDataset_BE(Dataset):
     """ Binding and Expression DMS Embedded Dataset, multi target. """
     
-    def __init__(self, parquet_file:str):
+    def __init__(self, tensor_file:str):
         """
         Load from parquet file into pandas:
-        - sequence label ('labels'), 
+        - sequence label ('label'), 
         - 'embedding',
         - binding target,
         - expression target
         """
         try:
-            parquet_file = pq.ParquetFile(parquet_file)
-            
-            chunks = []
-            # Read and process the file in batches
-            for batch in parquet_file.iter_batches(batch_size=1000):  # Adjust batch size as needed
-                # Convert the batch to a Pandas DataFrame and append to the list
-                chunk_df = batch.to_pandas()
-                chunks.append(chunk_df)
-
-            # Combine all chunks into a single DataFrame
-            self.full_df = pd.concat(chunks, ignore_index=True)
-
-        except (FileNotFoundError, pd.errors.ParserError, Exception) as e:
-            print(f"Error reading in .parquet file: {parquet_file}\n{e}", file=sys.stderr)
+            self.data = torch.load(tensor_file)
+        except (FileNotFoundError, KeyError, Exception) as e:
+            print(f"Error reading the tensor file: {tensor_file}\n{e}", file=sys.stderr)
             sys.exit(1)
 
     def __len__(self) -> int:
-        return len(self.full_df)
+        return len(self.data['label'])
 
     def __getitem__(self, idx):
         # label, embedding, binding target, expression target
-        return self.full_df['label'][idx], torch.tensor(np.vstack(np.array(self.full_df['embedding'][idx])), dtype=torch.float32).squeeze(1), self.full_df['ACE2-binding_affinity'][idx], self.full_df['RBD_expression'][idx]
+        return self.data['label'][idx], self.data['embedding'][idx], self.data['ACE2-binding_affinity'][idx], self.data['RBD_expression'][idx]
 
 # HELPER FUNCTIONS
 def count_parameters(model):

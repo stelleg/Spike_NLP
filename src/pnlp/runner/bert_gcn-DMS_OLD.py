@@ -1,20 +1,24 @@
 #!/usr/bin/env python
 """
-Model runner for BERT-BLSTM model (single target).
+Model runner for BERT-GCN model (single target).
 BERT weights initialized with finetuned BERT_MLM-ESM_INIT weights.
 """
 import os
 import tqdm
-import time
 import torch
+import time
 import datetime
 import numpy as np
+from typing import Union
 from torch import nn
 from torch.utils.data import DataLoader
-from typing import Union
 
 from pnlp.model.language import BERT, ProteinMaskedLanguageModel
 from pnlp.embedding.tokenizer import ProteinTokenizer, token_to_index
+
+from torch_geometric.nn import SAGEConv, global_mean_pool
+from torch_geometric.data import Data, Batch
+from torch_geometric.loader import DataLoader
 
 from runner_util_dms_bert_mlm import (
     DMSDataset,
@@ -25,78 +29,59 @@ from runner_util_dms_bert_mlm import (
     plot_log_file,
 )
 
-# BLSTM
-class BLSTM(nn.Module):
-    """ Bidirectional LSTM. Output is embedding layer, not prediction value."""
+class GraphSAGE(nn.Module):
+    """ GraphSAGE. """
 
-    def __init__(self,
-                 lstm_input_size,    # The number of expected features.
-                 lstm_hidden_size,   # The number of features in hidden state h.
-                 lstm_num_layers,    # Number of recurrent layers in LSTM.
-                 lstm_bidirectional, # Bidrectional LSTM.
-                 fcn_hidden_size,    # The number of features in hidden layer of CN.
-                 fcn_num_layers):    # The number of fcn layers
-        super().__init__()
+    def __init__(self, input_channels, hidden_channels, output_channels):
+        super(GraphSAGE, self).__init__()
+        self.conv1 = SAGEConv(input_channels, hidden_channels)
+        self.conv2 = SAGEConv(hidden_channels, output_channels)
 
-        # LSTM layer
-        self.lstm = nn.LSTM(input_size=lstm_input_size,
-                            hidden_size=lstm_hidden_size,
-                            num_layers=lstm_num_layers,
-                            bidirectional=lstm_bidirectional,
-                            batch_first=True)           
+    def forward(self, x, edge_index, batch):
+        x = self.conv1(x, edge_index).relu()
+        x = self.conv2(x, edge_index)
+        x = global_mean_pool(x, batch)
+        return x
 
-        # FCN layer(s)
-        layers = []
-        input_size = 2 * lstm_hidden_size if lstm_bidirectional else lstm_hidden_size
-
-        for _ in range(fcn_num_layers):
-            layers.append(nn.Linear(input_size, fcn_hidden_size))
-            layers.append(nn.ReLU())
-            input_size = fcn_hidden_size
-
-        self.fcn = nn.Sequential(*layers)
-
-        # FCN output layer
-        self.out = nn.Linear(fcn_hidden_size, 1)
-
-    def forward(self, x):
-        if x.dim() == 2:
-            x = x.unsqueeze(1)  # Add a sequence length dimension of 1, now [batch_size, sequence_length, features]
-
-        num_directions = 2 if self.lstm.bidirectional else 1
-        h_0 = torch.zeros(num_directions * self.lstm.num_layers, x.size(0), self.lstm.hidden_size, device=x.device)
-        c_0 = torch.zeros(num_directions * self.lstm.num_layers, x.size(0), self.lstm.hidden_size, device=x.device)
-
-        lstm_out, (h_n, c_n) = self.lstm(x, (h_0, c_0))
-        lstm_final_out = lstm_out[:, -1, :]
-        fcn_out = self.fcn(lstm_final_out)
-        prediction = self.out(fcn_out).squeeze(1)  # [batch_size]
-
-        return prediction
-
-# BERT-BLSTM
-class BERT_BLSTM(nn.Module):
-    def __init__(self, bert, blstm, vocab_size):
+class BERT_GCN(nn.Module):
+    def __init__(self, bert, gcn, vocab_size):
         super().__init__()
         self.bert = bert
         self.mlm = ProteinMaskedLanguageModel(self.bert.hidden, vocab_size)
-        self.blstm = blstm
+        self.gcn = gcn
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        bert_embedding = self.bert(x)
-        error_1 = self.mlm(bert_embedding) # error from masked language
-        error_2 = self.blstm(bert_embedding) # error from regession
-        return error_1, error_2
+    def forward(self, x, targets):
+        with torch.set_grad_enabled(self.training):  # Enable gradients, managed by model.eval() or model.train() in epoch_iteration
+            bert_embedding = self.bert(x)
+            error_1 = self.mlm(bert_embedding) # error from masked language
+        
+            # Graph Construction
+            graphs = []
+            for embedding, target in zip(bert_embedding, targets):
+                edges = [(i, i+1) for i in range(embedding.size(0) - 1)]
+                edge_index = torch.tensor(edges, dtype=torch.int64).t().contiguous()
+
+                graphs.append(Data(
+                    x=embedding, 
+                    edge_index=edge_index,
+                    y = target.view(-1, 1)
+                ))
+            batch_graph = Batch.from_data_list(graphs)
+            batch_graph = batch_graph.to(next(self.gcn.parameters()).device)
+
+            error_2 = self.gcn(batch_graph.x, batch_graph.edge_index, batch_graph.batch) # error from regession
+
+        return error_1, error_2, batch_graph.y
 
 # MODEL RUNNING
 def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: int, lr:float, max_batch: Union[int, None], device: str, run_dir: str, save_as: str, saved_model_pth:str=None, from_checkpoint:bool=False):
     """ Run a model through train and test epochs. """
 
     model = model.to(device)
-    blstm_loss_fn = nn.MSELoss(reduction='sum').to(device) 
+    gcn_loss_fn = nn.MSELoss(reduction='sum').to(device) 
     mlm_loss_fn = nn.CrossEntropyLoss(reduction='sum').to(device) 
-    optimizer = torch.optim.SGD(model.parameters(), lr)
-    #optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    #optimizer = torch.optim.SGD(model.parameters(), lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     metrics_csv = os.path.join(run_dir, f"{save_as}_metrics.csv")
     metrics_img = os.path.join(run_dir, f"{save_as}_metrics.pdf")
@@ -128,8 +113,8 @@ def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: i
                 f"Epoch,"
                 f"Train MLM Accuracy,Test MLM Accuracy,"
                 f"Train MLM Loss,Test MLM Loss,"
-                f"Train BLSTM MSE,Test BLSTM MSE,"
-                f"Train BLSTM RMSE,Test BLSTM RMSE,"
+                f"Train GCN MSE,Test GCN MSE,"
+                f"Train GCN RMSE,Test GCN RMSE,"
                 f"Train Loss,Test Loss\n"
             )
 
@@ -137,12 +122,12 @@ def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: i
     start_time = time.time()
 
     for epoch in range(starting_epoch, n_epochs + 1):
-        train_mlm_accuracy, train_mlm_loss, train_blstm_mse, train_blstm_rmse, train_loss = epoch_iteration(model, tokenizer, mlm_loss_fn, blstm_loss_fn, optimizer, train_data_loader, epoch, max_batch, device, mode='train')
-        test_mlm_accuracy, test_mlm_loss, test_blstm_mse, test_blstm_rmse, test_loss = epoch_iteration(model, tokenizer, mlm_loss_fn, blstm_loss_fn, optimizer, test_data_loader, epoch, max_batch, device, mode='test')
+        train_mlm_accuracy, train_mlm_loss, train_gcn_mse, train_gcn_rmse, train_loss = epoch_iteration(model, tokenizer, mlm_loss_fn, gcn_loss_fn, optimizer, train_data_loader, epoch, max_batch, device, mode='train')
+        test_mlm_accuracy, test_mlm_loss, test_gcn_mse, test_gcn_rmse, test_loss = epoch_iteration(model, tokenizer, mlm_loss_fn, gcn_loss_fn, optimizer, test_data_loader, epoch, max_batch, device, mode='test')
 
         print(f'Epoch {epoch} | Train MLM Accuracy: {train_mlm_accuracy:.4f}, Test MLM Accuracy: {test_mlm_accuracy:.4f}')
         print(f'{" "*(8+len(str(epoch)))} Train MLM Loss: {train_mlm_loss:.4f}, Test MLM Loss: {test_mlm_loss:.4f}')
-        print(f'{" "*(8+len(str(epoch)))} Train BLSTM RMSE: {train_blstm_rmse:.4f}, Test BLSTM RMSE: {test_blstm_rmse:.4f}')
+        print(f'{" "*(8+len(str(epoch)))} Train GCN RMSE: {train_gcn_rmse:.4f}, Test GCN RMSE: {test_gcn_rmse:.4f}')
         print(f'{" "*(8+len(str(epoch)))} Train Loss: {train_loss:.4f}, Test Loss: {test_loss:.4f}\n')
         
         with open(metrics_csv, "a") as fa:  
@@ -150,8 +135,8 @@ def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: i
                 f"{epoch},"
                 f"{train_mlm_accuracy},{test_mlm_accuracy},"
                 f"{train_mlm_loss},{test_mlm_loss},"
-                f"{train_blstm_mse},{test_blstm_mse},"
-                f"{train_blstm_rmse},{test_blstm_rmse},"
+                f"{train_gcn_mse},{test_gcn_mse},"
+                f"{train_gcn_rmse},{test_gcn_rmse},"
                 f"{train_loss},{test_loss}\n"
             )
             fa.flush()
@@ -175,7 +160,7 @@ def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: i
             
         print("")
 
-    plot_log_file(metrics_csv, metrics_img, "BLSTM")
+    plot_log_file(metrics_csv, metrics_img, "GCN")
 
     # End timer and print duration
     end_time = time.time()
@@ -183,7 +168,7 @@ def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: i
     formatted_duration = str(datetime.timedelta(seconds=duration))
     print(f'Training and testing complete in: {formatted_duration} (D day(s), H:MM:SS.microseconds)')
 
-def epoch_iteration(model, tokenizer, mlm_loss_fn, blstm_loss_fn, optimizer, data_loader, epoch, max_batch, device, mode):
+def epoch_iteration(model, tokenizer, mlm_loss_fn, gcn_loss_fn, optimizer, data_loader, epoch, max_batch, device, mode):
     """ Used in run_model. """
     
     model.train() if mode=='train' else model.eval()
@@ -194,7 +179,7 @@ def epoch_iteration(model, tokenizer, mlm_loss_fn, blstm_loss_fn, optimizer, dat
                           bar_format='{l_bar}{r_bar}')
     
     total_mlm_loss = 0
-    total_blstm_loss = 0
+    total_gcn_loss = 0
     total_loss = 0
     total_masked = 0
     total_items = 0
@@ -215,23 +200,23 @@ def epoch_iteration(model, tokenizer, mlm_loss_fn, blstm_loss_fn, optimizer, dat
    
         if mode == 'train':
             optimizer.zero_grad()
-            mlm_preds, blstm_preds = model(masked_tokenized_seqs)
+            mlm_preds, gcn_preds, y = model(masked_tokenized_seqs, targets)
             batch_mlm_loss = mlm_loss_fn(mlm_preds.transpose(1, 2), unmasked_tokenized_seqs)
-            batch_blstm_loss = blstm_loss_fn(blstm_preds, targets)
-            batch_loss = (batch_mlm_loss * 0.1) + batch_blstm_loss 
+            batch_gcn_loss = gcn_loss_fn(gcn_preds, y)
+            batch_loss = (batch_mlm_loss * 0.1) + batch_gcn_loss 
             batch_loss.backward()
             optimizer.step()
 
         else:
             with torch.no_grad():
-                mlm_preds, blstm_preds = model(masked_tokenized_seqs)
+                mlm_preds, gcn_preds, y = model(masked_tokenized_seqs, targets)
                 batch_mlm_loss = mlm_loss_fn(mlm_preds.transpose(1, 2), unmasked_tokenized_seqs)
-                batch_blstm_loss = blstm_loss_fn(blstm_preds, targets)
-                batch_loss = (batch_mlm_loss * 0.1) + batch_blstm_loss
+                batch_gcn_loss = gcn_loss_fn(gcn_preds, y)
+                batch_loss = (batch_mlm_loss * 0.1) + batch_gcn_loss
 
         # Loss
         total_mlm_loss += batch_mlm_loss.item()
-        total_blstm_loss += batch_blstm_loss.item()
+        total_gcn_loss += batch_gcn_loss.item()
         total_loss += batch_loss.item()
         total_items += targets.size(0)
 
@@ -245,26 +230,26 @@ def epoch_iteration(model, tokenizer, mlm_loss_fn, blstm_loss_fn, optimizer, dat
     avg_mlm_loss = total_mlm_loss / total_masked
     avg_mlm_accuracy = (correct_predictions / total_masked) * 100
 
-    # RMSE - BLSTM
-    blstm_mse = total_blstm_loss/total_items
-    blstm_rmse = np.sqrt(blstm_mse)
+    # RMSE - GCN
+    gcn_mse = total_gcn_loss/total_items
+    gcn_rmse = np.sqrt(gcn_mse)
 
-    # MLM + BLSTM Average loss per item
+    # MLM + GCN Average loss per item
     avg_loss = total_loss / total_items
 
-    return avg_mlm_accuracy, avg_mlm_loss, blstm_mse, blstm_rmse, avg_loss
-      
+    return avg_mlm_accuracy, avg_mlm_loss, gcn_mse, gcn_rmse, avg_loss
+
 if __name__=='__main__':
 
     # Data/results directories
-    result_tag = 'binding' # specify expression or binding
-    data_dir = os.path.join(os.path.dirname(__file__), f'../../../data/dms')
-    results_dir = os.path.join(os.path.dirname(__file__), f'../../../results/run_results/bert_blstm')
+    result_tag = 'expression' # specify expression or binding
+    data_dir = os.path.join(os.path.dirname(__file__), f'../../../data/dms') 
+    results_dir = os.path.join(os.path.dirname(__file__), f'../../../results/run_results/bert_gcn')
 
     # Create run directory for results
     now = datetime.datetime.now()
     date_hour_minute = now.strftime("%Y-%m-%d_%H-%M")
-    run_dir = os.path.join(results_dir, f"bert_blstm-DMS_OLD-{result_tag}-{date_hour_minute}")
+    run_dir = os.path.join(results_dir, f"adam.lr1e-5.bert_gcn-DMS_OLD-{result_tag}-{date_hour_minute}")
     os.makedirs(run_dir, exist_ok = True)
 
     # Run setup
@@ -273,7 +258,7 @@ if __name__=='__main__':
     max_batch = -1
     num_workers = 64
     lr = 1e-5
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
 
     # Create Dataset and DataLoader
     torch.manual_seed(0)
@@ -295,17 +280,14 @@ if __name__=='__main__':
     bert.embedding.load_pretrained_embeddings(os.path.join(data_dir, '../rbd/esm_weights-embedding_dim320.pth'), no_grad=False)
     tokenizer = ProteinTokenizer(max_len, mask_prob)
 
-    # BLSTM input
+    # GraphSAGE input
     size = 320
-    lstm_input_size = size
-    lstm_hidden_size = size
-    lstm_num_layers = 1        
-    lstm_bidrectional = True   
-    fcn_hidden_size = size
-    fcn_num_layers = 5
-    blstm = BLSTM(lstm_input_size, lstm_hidden_size, lstm_num_layers, lstm_bidrectional, fcn_hidden_size, fcn_num_layers)
+    input_channels = size # Number of input channels (dimensions of the embeddings)
+    hidden_channels = size
+    out_channels = 1  # For regression output
+    gcn = GraphSAGE(input_channels, hidden_channels, out_channels)
 
-    # BERT-BLSTM input
+    # BERT-GCN input
     bert_model_pth = os.path.join(results_dir, "../bert_mlm-esm_init/bert_mlm-esm_init-RBD-2024-09-25_20-29/best_saved_model.pth")
     saved_state = torch.load(bert_model_pth, map_location=device, weights_only=False)
     model_state = saved_state['model_state_dict']
@@ -313,12 +295,12 @@ if __name__=='__main__':
     mlm_state_dict = {key[len('mlm.'):]: value for key, value in model_state.items() if key.startswith('mlm.')}
 
     bert.load_state_dict(bert_state_dict)
-    model = BERT_BLSTM(bert, blstm, len(token_to_index))
+    model = BERT_GCN(bert, gcn, len(token_to_index))
     model.mlm.load_state_dict(mlm_state_dict)
 
     # Run
     count_parameters(model)
     saved_model_pth = None
     from_checkpoint = False
-    save_as = f"bert_blstm-DMS_OLD-train_{len(train_dataset)}_test_{len(test_dataset)}"
+    save_as = f"bert_gcn-DMS_OLD_{result_tag}-train_{len(train_dataset)}_test_{len(test_dataset)}"
     run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs, lr, max_batch, device, run_dir, save_as, saved_model_pth, from_checkpoint)

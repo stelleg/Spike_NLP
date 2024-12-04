@@ -197,12 +197,12 @@ if __name__=='__main__':
     # Create Dataset and DataLoader
     torch.manual_seed(0)
 
-    train_dataset = DMSEmbeddedDataset(os.path.join(data_dir, "parquets/mutation_combined_DMS_OLD_train_ESM-AA-embedded.parquet"), result_tag)
+    train_dataset = DMSEmbeddedDataset(os.path.join(data_dir, "pt/mutation_combined_DMS_OLD_train_ESM-AA-embedded.pt"), result_tag)
     train_data_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=False, num_workers=num_workers, pin_memory=True)
 
-    test_dataset = DMSEmbeddedDataset(os.path.join(data_dir, "parquets/mutation_combined_DMS_OLD_test_ESM-AA-embedded.parquet"), result_tag)
+    test_dataset = DMSEmbeddedDataset(os.path.join(data_dir, "pt/mutation_combined_DMS_OLD_test_ESM-AA-embedded.pt"), result_tag)
     test_data_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, drop_last=False, num_workers=num_workers, pin_memory=True)
-
+    
     # GraphSAGE input
     size = 320
     input_channels = size # Number of input channels (dimensions of the embeddings)

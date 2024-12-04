@@ -85,9 +85,9 @@ class ESM_BLSTM(nn.Module):
         # After assigning embedding weights
         print("After assignment:", self.esm.embeddings.word_embeddings.weight.data[:5])
         
-    def forward(self, tokenized_seqs):
+    def forward(self, x):
         with torch.set_grad_enabled(self.training):  # Enable gradients, managed by model.eval() or model.train() in epoch_iteration
-            esm_last_hidden_state = self.esm(**tokenized_seqs).last_hidden_state # shape: [batch_size, sequence_length, embedding_dim]
+            esm_last_hidden_state = self.esm(**x).last_hidden_state # shape: [batch_size, sequence_length, embedding_dim]
             esm_aa_embedding = esm_last_hidden_state[:, 1:-1, :] # Amino Acid-level representations, [batch_size, sequence_length-2, embedding_dim], excludes 1st and last tokens
             output = self.blstm(esm_aa_embedding) # [batch_size]
         return output
