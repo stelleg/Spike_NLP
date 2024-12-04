@@ -5,8 +5,9 @@ BERT weights initialized with finetuned BERT_MLM-ESM_INIT weights.
 """
 import os
 import tqdm
-import torch
 import time
+import torch
+import random
 import datetime
 import numpy as np
 from typing import Union
@@ -242,14 +243,14 @@ def epoch_iteration(model, tokenizer, mlm_loss_fn, gcn_loss_fn, optimizer, data_
 if __name__=='__main__':
 
     # Data/results directories
-    result_tag = 'expression' # specify expression or binding
+    result_tag = 'binding' # specify expression or binding
     data_dir = os.path.join(os.path.dirname(__file__), f'../../../data/dms') 
     results_dir = os.path.join(os.path.dirname(__file__), f'../../../results/run_results/bert_gcn')
 
     # Create run directory for results
     now = datetime.datetime.now()
     date_hour_minute = now.strftime("%Y-%m-%d_%H-%M")
-    run_dir = os.path.join(results_dir, f"adam.lr1e-5.bert_gcn-DMS_OLD-{result_tag}-{date_hour_minute}")
+    run_dir = os.path.join(results_dir, f"bert_gcn-DMS_OLD-{result_tag}-{date_hour_minute}")
     os.makedirs(run_dir, exist_ok = True)
 
     # Run setup
@@ -258,17 +259,40 @@ if __name__=='__main__':
     max_batch = -1
     num_workers = 64
     lr = 1e-5
-    device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Create Dataset and DataLoader
     torch.manual_seed(0)
 
+    def seed_worker(worker_id):
+        worker_seed = torch.initial_seed() % 2**32
+        np.random.seed(worker_seed)
+        random.seed(worker_seed)
+
     train_dataset = DMSDataset(os.path.join(data_dir, "mutation_combined_DMS_OLD_train.csv"), result_tag)
-    train_data_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=False, num_workers=num_workers, pin_memory=True)
+    train_data_loader = DataLoader(
+        train_dataset, 
+        batch_size=batch_size, 
+        shuffle=True, 
+        drop_last=False, 
+        num_workers=num_workers, 
+        worker_init_fn=seed_worker, 
+        generator=torch.Generator().manual_seed(0), 
+        pin_memory=True
+    )
 
     test_dataset = DMSDataset(os.path.join(data_dir, "mutation_combined_DMS_OLD_test.csv"), result_tag)
-    test_data_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, drop_last=False, num_workers=num_workers, pin_memory=True)
-
+    test_data_loader = DataLoader(
+        test_dataset, 
+        batch_size=batch_size, 
+        shuffle=True, 
+        drop_last=False, 
+        num_workers=num_workers, 
+        worker_init_fn=seed_worker, 
+        generator=torch.Generator().manual_seed(0), 
+        pin_memory=True
+    )
+    
     # BERT input
     max_len = 280
     mask_prob = 0.15

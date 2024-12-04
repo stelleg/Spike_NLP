@@ -5,8 +5,9 @@ ESM weights initialized with finetuned BERT_MLM-ESM_INIT weights.
 """
 import os
 import tqdm
-import torch
 import time
+import torch
+import random
 import datetime
 import numpy as np
 from typing import Union
@@ -238,12 +239,35 @@ if __name__=='__main__':
     # Create Dataset and DataLoader
     torch.manual_seed(0)
 
+    def seed_worker(worker_id):
+        worker_seed = torch.initial_seed() % 2**32
+        np.random.seed(worker_seed)
+        random.seed(worker_seed)
+
     train_dataset = DMSDataset(os.path.join(data_dir, "mutation_combined_DMS_OLD_train.csv"), result_tag)
-    train_data_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=False, num_workers=num_workers, pin_memory=True)
+    train_data_loader = DataLoader(
+        train_dataset, 
+        batch_size=batch_size, 
+        shuffle=True, 
+        drop_last=False, 
+        num_workers=num_workers, 
+        worker_init_fn=seed_worker, 
+        generator=torch.Generator().manual_seed(0), 
+        pin_memory=True
+    )
 
     test_dataset = DMSDataset(os.path.join(data_dir, "mutation_combined_DMS_OLD_test.csv"), result_tag)
-    test_data_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, drop_last=False, num_workers=num_workers, pin_memory=True)
-
+    test_data_loader = DataLoader(
+        test_dataset, 
+        batch_size=batch_size, 
+        shuffle=True, 
+        drop_last=False, 
+        num_workers=num_workers, 
+        worker_init_fn=seed_worker, 
+        generator=torch.Generator().manual_seed(0), 
+        pin_memory=True
+    )
+    
     # ESM input
     esm_version = "facebook/esm2_t6_8M_UR50D" 
     esm = EsmModel.from_pretrained(esm_version, cache_dir='../../../../model_downloads').to(device)
