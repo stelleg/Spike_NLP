@@ -99,8 +99,7 @@ def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: i
 
     model = model.to(device)
     loss_fn = nn.MSELoss(reduction='sum').to(device)
-    optimizer = torch.optim.SGD(model.parameters(), lr)
-    #optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     metrics_csv = os.path.join(run_dir, f"{save_as}_metrics.csv")
     metrics_img = os.path.join(run_dir, f"{save_as}_metrics.pdf")
@@ -217,6 +216,14 @@ def epoch_iteration(model, tokenizer, loss_fn, optimizer, data_loader, epoch, ma
 
 if __name__=='__main__':
 
+    # Run setup
+    n_epochs = 1000
+    batch_size = 64
+    max_batch = -1
+    num_workers = 4
+    lr = 1e-5
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
     # Data/results directories
     result_tag = 'binding' # specify expression or binding
     data_dir = os.path.join(os.path.dirname(__file__), f'../../../data/dms') 
@@ -225,16 +232,8 @@ if __name__=='__main__':
     # Create run directory for results
     now = datetime.datetime.now()
     date_hour_minute = now.strftime("%Y-%m-%d_%H-%M")
-    run_dir = os.path.join(results_dir, f"esm_blstm-bert_mlm_esm_init-DMS_OLD-{result_tag}-{date_hour_minute}")
+    run_dir = os.path.join(results_dir, f"adam.lr{lr}.esm_blstm-bert_mlm_esm_init-DMS_OLD-{result_tag}-{date_hour_minute}")
     os.makedirs(run_dir, exist_ok = True)
-
-    # Run setup
-    n_epochs = 1000
-    batch_size = 64
-    max_batch = -1
-    num_workers = 4
-    lr = 1e-5
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Create Dataset and DataLoader
     torch.manual_seed(0)

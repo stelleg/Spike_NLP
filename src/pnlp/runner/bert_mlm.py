@@ -194,16 +194,6 @@ def epoch_iteration(model, tokenizer, loss_fn, scheduler, data_loader, epoch, ma
 
 if __name__=='__main__':
 
-    # Data/results directories
-    data_dir = os.path.join(os.path.dirname(__file__), f'../../../data/rbd')
-    results_dir = os.path.join(os.path.dirname(__file__), f'../../../results/run_results/bert_mlm')
-
-    # Create run directory for results
-    now = datetime.datetime.now()
-    date_hour_minute = now.strftime("%Y-%m-%d_%H-%M")
-    run_dir = os.path.join(results_dir, f"bert_mlm-RBD-{date_hour_minute}")
-    os.makedirs(run_dir, exist_ok = True)
-
     # Run setup
     n_epochs = 100
     batch_size = 64
@@ -211,6 +201,16 @@ if __name__=='__main__':
     num_workers = 4
     lr = 1e-5
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    # Data/results directories
+    data_dir = os.path.join(os.path.dirname(__file__), f'../../../data/rbd')
+    results_dir = os.path.join(os.path.dirname(__file__), f'../../../results/run_results/bert_mlm')
+
+    # Create run directory for results
+    now = datetime.datetime.now()
+    date_hour_minute = now.strftime("%Y-%m-%d_%H-%M")
+    run_dir = os.path.join(results_dir, f"adam.lr{lr}.bert_mlm-RBD-{date_hour_minute}")
+    os.makedirs(run_dir, exist_ok = True)
 
     # Create Dataset and DataLoader
     torch.manual_seed(0)
