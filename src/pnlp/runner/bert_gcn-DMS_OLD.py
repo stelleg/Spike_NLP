@@ -311,7 +311,7 @@ if __name__=='__main__':
     gcn = GraphSAGE(input_channels, hidden_channels, out_channels)
 
     # BERT-GCN input
-    bert_model_pth = os.path.join(results_dir, "../bert_mlm-esm_init/bert_mlm-esm_init-RBD-2024-09-25_20-29/best_saved_model.pth")
+    bert_model_pth = os.path.join(results_dir, "../bert_mlm-esm_init/adam.lr1e-05.bert_mlm-esm_init-RBD-2024-12-04_14-33/best_saved_model.pth")
     saved_state = torch.load(bert_model_pth, map_location=device, weights_only=False)
     model_state = saved_state['model_state_dict']
     bert_state_dict = {key[len('bert.'):]: value for key, value in model_state.items() if key.startswith('bert.')}
