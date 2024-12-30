@@ -281,7 +281,7 @@ if __name__=='__main__':
     n_epochs = 1000
     batch_size = 64
     max_batch = -1
-    num_workers = 64
+    num_workers = 4
     lr = 1e-5
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -349,7 +349,7 @@ if __name__=='__main__':
     blstm = BLSTM(lstm_input_size, lstm_hidden_size, lstm_num_layers, lstm_bidrectional, fcn_hidden_size, fcn_num_layers)
 
     # BERT-BLSTM input
-    bert_model_pth = os.path.join(results_dir, "../bert_mlm-esm_init/bert_mlm-esm_init-RBD-2024-09-25_20-29/best_saved_model.pth")
+    bert_model_pth = os.path.join(results_dir, "../bert_mlm-esm_init/adam.lr1e-05.bert_mlm-esm_init-RBD-2024-12-04_14-33/best_saved_model.pth")
     saved_state = torch.load(bert_model_pth, map_location=device, weights_only=False)
     model_state = saved_state['model_state_dict']
     bert_state_dict = {key[len('bert.'):]: value for key, value in model_state.items() if key.startswith('bert.')}

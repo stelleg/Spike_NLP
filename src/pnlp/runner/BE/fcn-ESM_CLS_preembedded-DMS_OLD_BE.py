@@ -200,6 +200,14 @@ def epoch_iteration(model, loss_fn, optimizer, data_loader, epoch, max_batch, de
 
 if __name__=='__main__':
 
+    # Run setup
+    n_epochs = 1000
+    batch_size = 64
+    max_batch = -1
+    num_workers = 4
+    lr = 1e-5
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
     # Data/results directories
     data_dir = os.path.join(os.path.dirname(__file__), f'../../../data/dms') 
     results_dir = os.path.join(os.path.dirname(__file__), f'../../../results/run_results/fcn-ESM_CLS_preembedded')
@@ -209,14 +217,6 @@ if __name__=='__main__':
     date_hour_minute = now.strftime("%Y-%m-%d_%H-%M")
     run_dir = os.path.join(results_dir, f"fcn-ESM_CLS_preembedded-DMS_OLD_BE-{date_hour_minute}")
     os.makedirs(run_dir, exist_ok = True)
-
-    # Run setup
-    n_epochs = 1000
-    batch_size = 64
-    max_batch = -1
-    num_workers = 64
-    lr = 1e-5
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Create Dataset and DataLoader
     torch.manual_seed(0)
