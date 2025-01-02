@@ -206,7 +206,7 @@ def plot_log_file_BE(metrics_csv, metrics_img):
     # Plot 1: Training Metrics (binding, expression, combined RMSE)
     ax1.plot(df['Epoch'], df['Train Binding RMSE'], label='Train Binding RMSE', color='tab:blue', linewidth=3)
     ax1.plot(df['Epoch'], df['Train Expression RMSE'], label='Train Expression RMSE', color='tab:green', linewidth=3)
-    ax1.plot(df['Epoch'], df['Train RMSE'], label='Train RMSE (Combined)', color='tab:orange', linewidth=3)
+    ax1.plot(df['Epoch'], df['Train BE RMSE'], label='Train BE RMSE', color='tab:orange', linewidth=3)
 
     ax1.tick_params(axis='x', labelsize=fontsize)
     ax1.set_ylabel('RMSE', fontsize=fontsize)
@@ -217,7 +217,7 @@ def plot_log_file_BE(metrics_csv, metrics_img):
     # Plot 2: Testing Metrics (binding, expression, combined RMSE)
     ax2.plot(df['Epoch'], df['Test Binding RMSE'], label='Test Binding RMSE', color='tab:blue', linewidth=3)
     ax2.plot(df['Epoch'], df['Test Expression RMSE'], label='Test Expression RMSE', color='tab:green', linewidth=3)
-    ax2.plot(df['Epoch'], df['Test RMSE'], label='Test RMSE (Combined)', color='tab:orange', linewidth=3)
+    ax2.plot(df['Epoch'], df['Test BE RMSE'], label='Test BE RMSE', color='tab:orange', linewidth=3)
 
     ax2.set_xlabel('Epochs', fontsize=fontsize)
     ax2.tick_params(axis='x', labelsize=fontsize)

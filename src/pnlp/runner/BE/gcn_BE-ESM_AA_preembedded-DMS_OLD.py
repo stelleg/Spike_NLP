@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Model runner for BLSTM model (multi target for both binding and expression). 
+Model runner for GCN model (multi target for both binding and expression). 
 This one loads in from pt of preembedded ESM AA sequences.
 """
 import os
@@ -14,6 +14,10 @@ from typing import Union
 from torch import nn
 from torch.utils.data import DataLoader
 
+from torch_geometric.nn import SAGEConv, global_mean_pool
+from torch_geometric.data import Data, Batch
+from torch_geometric.loader import DataLoader
+
 from runner_util_dms import (
     DMSEmbeddedDataset_BE,
     count_parameters,
@@ -23,54 +27,21 @@ from runner_util_dms import (
     plot_log_file_BE,
 )
 
-# BLSTM
-class BLSTM(nn.Module):
-    """ Bidirectional LSTM. Output is embedding layer, not prediction value."""
+class GraphSAGE(nn.Module):
+    def __init__(self, input_channels, hidden_channels, output_channels):
+        super(GraphSAGE, self).__init__()
+        self.conv1 = SAGEConv(input_channels, hidden_channels)
+        self.conv2 = SAGEConv(hidden_channels, output_channels)
+        self.binding_output = nn.Linear(hidden_channels, output_channels)
+        self.expression_output = nn.Linear(hidden_channels, output_channels)
 
-    def __init__(self,
-                 lstm_input_size,    # The number of expected features.
-                 lstm_hidden_size,   # The number of features in hidden state h.
-                 lstm_num_layers,    # Number of recurrent layers in LSTM.
-                 lstm_bidirectional, # Bidrectional LSTM.
-                 fcn_hidden_size,    # The number of features in hidden layer of CN.
-                 fcn_num_layers):    # The number of fcn layers
-        super().__init__()
-
-        # LSTM layer
-        self.lstm = nn.LSTM(input_size=lstm_input_size,
-                            hidden_size=lstm_hidden_size,
-                            num_layers=lstm_num_layers,
-                            bidirectional=lstm_bidirectional,
-                            batch_first=True)           
-
-        # FCN layer(s)
-        layers = []
-        input_size = 2 * lstm_hidden_size if lstm_bidirectional else lstm_hidden_size
-
-        for _ in range(fcn_num_layers):
-            layers.append(nn.Linear(input_size, fcn_hidden_size))
-            layers.append(nn.ReLU())
-            input_size = fcn_hidden_size
-
-        self.fcn = nn.Sequential(*layers)
-
-        # FCN output layers - two separate heads for binding and expression
-        self.binding_head = nn.Linear(fcn_hidden_size, 1)
-        self.expression_head = nn.Linear(fcn_hidden_size, 1)
-
-    def forward(self, x):
-        num_directions = 2 if self.lstm.bidirectional else 1
-        h_0 = torch.zeros(num_directions * self.lstm.num_layers, x.size(0), self.lstm.hidden_size, device=x.device)
-        c_0 = torch.zeros(num_directions * self.lstm.num_layers, x.size(0), self.lstm.hidden_size, device=x.device)
-        lstm_out, (h_n, c_n) = self.lstm(x, (h_0, c_0))
-        lstm_final_out = lstm_out[:, -1, :] 
-        fcn_out = self.fcn(lstm_final_out)
-
-        # Task-specific predictions
-        binding_pred = self.binding_head(fcn_out).squeeze(1) # [batch_size]
-        expression_pred = self.expression_head(fcn_out).squeeze(1) # [batch_size]
-
-        return binding_pred, expression_pred
+    def forward(self, x, edge_index, batch):
+        x = self.conv1(x, edge_index).relu()
+        x = self.conv2(x, edge_index)
+        x = global_mean_pool(x, batch)
+        binding_output = self.binding_output(x)
+        expression_output = self.expression_output(x)
+        return binding_output, expression_output
 
 # MODEL RUNNING
 def run_model(model, train_data_loader, test_data_loader, n_epochs: int, lr:float, max_batch: Union[int, None], device: str, run_dir: str, save_as: str, saved_model_pth:str=None, from_checkpoint:bool=False):
@@ -181,20 +152,34 @@ def epoch_iteration(model, loss_fn, optimizer, data_loader, epoch, max_batch, de
         seq_ids, embeddings, binding_targets, expression_targets = batch_data
         embeddings, binding_targets, expression_targets = embeddings.to(device), binding_targets.to(device).float(), expression_targets.to(device).float()
    
+        # Graph Construction
+        graphs = []
+        for embedding, b_target, e_target in zip(embeddings, binding_targets, expression_targets):
+            edges = [(i, i+1) for i in range(embedding.size(0) - 1)]
+            edge_index = torch.tensor(edges, dtype=torch.int64).t().contiguous()
+            graphs.append(Data(
+                x=embedding,
+                edge_index=edge_index,
+                y=torch.tensor([[b_target, e_target]], dtype=torch.float32)  # Add an extra dimension
+            ))
+        
+        batch_graph = Batch.from_data_list(graphs)
+        batch_graph = batch_graph.to(next(model.parameters()).device)
+
         if mode == 'train':
             optimizer.zero_grad()
-            binding_preds, expression_preds = model(embeddings)
-            binding_loss = loss_fn(binding_preds, binding_targets)
-            expression_loss = loss_fn(expression_preds, expression_targets)
+            binding_preds, expression_preds = model(batch_graph.x, batch_graph.edge_index, batch_graph.batch)
+            binding_loss = loss_fn(binding_preds, batch_graph.y[:, 0])
+            expression_loss = loss_fn(expression_preds, batch_graph.y[:, 1])
             batch_be_loss = binding_loss + expression_loss
             batch_be_loss.backward()
             optimizer.step()
 
         else:
             with torch.no_grad():
-                binding_preds, expression_preds = model(embeddings)
-                binding_loss = loss_fn(binding_preds, binding_targets)
-                expression_loss = loss_fn(expression_preds, expression_targets)
+                binding_preds, expression_preds = model(batch_graph.x, batch_graph.edge_index, batch_graph.batch)
+                binding_loss = loss_fn(binding_preds, batch_graph.y[:, 0])
+                expression_loss = loss_fn(expression_preds, batch_graph.y[:, 1])
                 batch_be_loss = binding_loss + expression_loss
 
         total_binding_loss += binding_loss.item()
@@ -218,7 +203,7 @@ def epoch_iteration(model, loss_fn, optimizer, data_loader, epoch, max_batch, de
 if __name__=='__main__':
 
     # Run setup
-    n_epochs = 1000
+    n_epochs = 2
     batch_size = 64
     max_batch = -1
     num_workers = 4
@@ -227,12 +212,12 @@ if __name__=='__main__':
 
     # Data/results directories
     data_dir = os.path.join(os.path.dirname(__file__), f'../../../data/dms') 
-    results_dir = os.path.join(os.path.dirname(__file__), f'../../../results/run_results/blstm-ESM_AA_preembedded')
+    results_dir = os.path.join(os.path.dirname(__file__), f'../../../results/run_results/gcn-ESM_AA_preembedded')
 
     # Create run directory for results
     now = datetime.datetime.now()
     date_hour_minute = now.strftime("%Y-%m-%d_%H-%M")
-    run_dir = os.path.join(results_dir, f"adam.lr{lr}.blstm_BE-ESM_AA_preembedded-DMS_OLD-{date_hour_minute}")
+    run_dir = os.path.join(results_dir, f"adam.lr{lr}.gcn_BE-ESM_AA_preembedded-DMS_OLD-{date_hour_minute}")
     os.makedirs(run_dir, exist_ok = True)
 
    # Create Dataset and DataLoader
@@ -267,19 +252,16 @@ if __name__=='__main__':
         pin_memory=True
     )
 
-    # BLSTM input
+    # GraphSAGE input
     size = 320
-    lstm_input_size = size
-    lstm_hidden_size = size
-    lstm_num_layers = 1        
-    lstm_bidrectional = True   
-    fcn_hidden_size = size
-    fcn_num_layers = 5
-    model = BLSTM(lstm_input_size, lstm_hidden_size, lstm_num_layers, lstm_bidrectional, fcn_hidden_size, fcn_num_layers)
+    input_channels = size # Number of input channels (dimensions of the embeddings)
+    hidden_channels = size
+    out_channels = 1  # For regression outputs
+    model = GraphSAGE(input_channels, hidden_channels, out_channels)
 
     # Run
     count_parameters(model)
     saved_model_pth = None
     from_checkpoint = False
-    save_as = f"blstm_BE-ESM_AA_preembedded-DMS_OLD-train_{len(train_dataset)}_test_{len(test_dataset)}"
+    save_as = f"gcn_BE-ESM_AA_preembedded-DMS_OLD-train_{len(train_dataset)}_test_{len(test_dataset)}"
     run_model(model, train_data_loader, test_data_loader, n_epochs, lr, max_batch, device, run_dir, save_as, saved_model_pth, from_checkpoint)

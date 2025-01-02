@@ -93,43 +93,43 @@ def run_model(model, train_data_loader, test_data_loader, n_epochs: int, lr:floa
         else: 
             fa.write((
                 "Epoch,"
-                "Train Binding MSE,Train Binding RMSE,Train Expression MSE,Train Expression RMSE,Train MSE,Train RMSE,"
-                "Test Binding MSE,Test Binding RMSE,Test Expression MSE,Test Expression RMSE,Test MSE,Test RMSE\n"
+                "Train Binding MSE,Train Binding RMSE,Train Expression MSE,Train Expression RMSE,Train BE MSE,Train BE RMSE,"
+                "Test Binding MSE,Test Binding RMSE,Test Expression MSE,Test Expression RMSE,Test BE MSE,Test BE RMSE\n"
             ))
 
     # Running
     start_time = time.time()
 
     for epoch in range(starting_epoch, n_epochs + 1):
-        train_binding_mse, train_binding_rmse, train_expression_mse, train_expression_rmse, train_mse, train_rmse = epoch_iteration(model, loss_fn, optimizer, train_data_loader, epoch, max_batch, device, mode='train')
-        test_binding_mse, test_binding_rmse, test_expression_mse, test_expression_rmse, test_mse, test_rmse = epoch_iteration(model, loss_fn, optimizer, test_data_loader, epoch, max_batch, device, mode='test')
+        train_binding_mse, train_binding_rmse, train_expression_mse, train_expression_rmse, train_be_mse, train_be_rmse = epoch_iteration(model, loss_fn, optimizer, train_data_loader, epoch, max_batch, device, mode='train')
+        test_binding_mse, test_binding_rmse, test_expression_mse, test_expression_rmse, test_be_mse, test_be_rmse = epoch_iteration(model, loss_fn, optimizer, test_data_loader, epoch, max_batch, device, mode='test')
 
-        print(f'Epoch {epoch} | Train Binding RMSE: {train_binding_rmse:.4f}, Train Expression RMSE: {train_expression_rmse:.4f}, Train RMSE: {train_rmse:.4f}') 
-        print(f'{" "*(8+len(str(epoch)))} Test Binding RMSE: {test_binding_rmse:.4f}, Test Expression RMSE: {test_expression_rmse:.4f}, Test RMSE: {test_rmse:.4f}') 
+        print(f'Epoch {epoch} | Train Binding RMSE: {train_binding_rmse:.4f}, Train Expression RMSE: {train_expression_rmse:.4f}, Train BE RMSE: {train_be_rmse:.4f}') 
+        print(f'{" "*(8+len(str(epoch)))} Test Binding RMSE: {test_binding_rmse:.4f}, Test Expression RMSE: {test_expression_rmse:.4f}, Test BE RMSE: {test_be_rmse:.4f}') 
 
         with open(metrics_csv, "a") as fa:         
             fa.write((
                 f"{epoch}," 
-                f"{train_binding_mse}, {train_binding_rmse}, {train_expression_mse}, {train_expression_rmse}, {train_mse}, {train_rmse},"
-                f"{test_binding_mse}, {test_binding_rmse}, {test_expression_mse}, {test_expression_rmse}, {test_mse}, {test_rmse}\n"
+                f"{train_binding_mse}, {train_binding_rmse}, {train_expression_mse}, {train_expression_rmse}, {train_be_mse}, {train_be_rmse},"
+                f"{test_binding_mse}, {test_binding_rmse}, {test_expression_mse}, {test_expression_rmse}, {test_be_mse}, {test_be_rmse}\n"
             ))                
             fa.flush()
 
         # Save best
-        if test_rmse < best_rmse:
-            best_rmse = test_rmse
+        if test_be_rmse < best_rmse:
+            best_rmse = test_be_rmse
             model_path = os.path.join(run_dir, f'best_saved_model.pth')
             print(f"NEW BEST model: RMSE loss {best_rmse:.4f}")
-            save_model(model, optimizer, model_path, epoch, test_rmse)
+            save_model(model, optimizer, model_path, epoch, test_be_rmse)
         
         # Save every 100 epochs
         if epoch > 0 and epoch % 100 == 0:
             model_path = os.path.join(run_dir, f'saved_model-epoch_{epoch}.pth')
-            save_model(model, optimizer, model_path, epoch, test_rmse)
+            save_model(model, optimizer, model_path, epoch, test_be_rmse)
 
         # Save checkpoint 
         model_path = os.path.join(run_dir, f'checkpoint_saved_model.pth')
-        save_model(model, optimizer, model_path, epoch, test_rmse)
+        save_model(model, optimizer, model_path, epoch, test_be_rmse)
             
         print("")
         
@@ -151,7 +151,9 @@ def epoch_iteration(model, loss_fn, optimizer, data_loader, epoch, max_batch, de
                           total=len(data_loader),
                           bar_format='{l_bar}{r_bar}')
 
-    total_binding_loss, total_expression_loss, total_loss = 0, 0, 0
+    total_binding_loss = 0
+    total_expression_loss = 0
+    total_be_loss = 0
     total_items = 0
 
     # Set max_batch if None
@@ -170,8 +172,8 @@ def epoch_iteration(model, loss_fn, optimizer, data_loader, epoch, max_batch, de
             binding_preds, expression_preds = model(embeddings)
             binding_loss = loss_fn(binding_preds, binding_targets)
             expression_loss = loss_fn(expression_preds, expression_targets)
-            batch_loss = binding_loss + expression_loss
-            batch_loss.backward()
+            batch_be_loss = binding_loss + expression_loss
+            batch_be_loss.backward()
             optimizer.step()
 
         else:
@@ -179,11 +181,11 @@ def epoch_iteration(model, loss_fn, optimizer, data_loader, epoch, max_batch, de
                 binding_preds, expression_preds = model(embeddings)
                 binding_loss = loss_fn(binding_preds, binding_targets)
                 expression_loss = loss_fn(expression_preds, expression_targets)
-                batch_loss = binding_loss + expression_loss
+                batch_be_loss = binding_loss + expression_loss
 
         total_binding_loss += binding_loss.item()
         total_expression_loss += expression_loss.item()
-        total_loss += batch_loss.item()
+        total_be_loss += batch_be_loss.item()
         total_items += binding_targets.size(0)  # same size as expression_targets.size(0)
     
     # total loss is the sum of squared errors over items encountered
@@ -191,13 +193,13 @@ def epoch_iteration(model, loss_fn, optimizer, data_loader, epoch, max_batch, de
     # we get mse and rmse per item
     binding_mse = total_binding_loss/total_items
     expression_mse = total_expression_loss/total_items
-    mse = total_loss/total_items
+    be_mse = total_be_loss/total_items
 
     binding_rmse = np.sqrt(binding_mse)
     expression_rmse = np.sqrt(expression_mse)
-    rmse = np.sqrt(mse)
+    be_rmse = np.sqrt(be_mse)
 
-    return binding_mse, binding_rmse, expression_mse, expression_rmse, mse, rmse
+    return binding_mse, binding_rmse, expression_mse, expression_rmse, be_mse, be_rmse
 
 if __name__=='__main__':
 
