@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
 Model runner for FCN model (single target).
-This one loads in from parquet of preembedded ESM CLS sequences.
+This one loads in from pt of preembedded ESM CLS sequences.
 """
 import os
 import tqdm

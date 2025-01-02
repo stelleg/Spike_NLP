@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
 Model runner for BLSTM model (single target).
-This one loads in from parquet of preembedded NLP sequences. 
+This one loads in from pt of preembedded NLP sequences. 
 """
 import os
 import tqdm

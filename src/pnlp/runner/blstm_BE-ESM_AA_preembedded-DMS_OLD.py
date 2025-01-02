@@ -1,12 +1,13 @@
 #!/usr/bin/env python
 """
 Model runner for BLSTM model (multi target for both binding and expression). 
-This one loads in from parquet of preembedded NLP sequences.
+This one loads in from pt of preembedded ESM AA sequences.
 """
 import os
 import tqdm
 import torch
 import time
+import random
 import datetime
 import numpy as np
 from typing import Union
@@ -77,7 +78,7 @@ def run_model(model, train_data_loader, test_data_loader, n_epochs: int, lr:floa
 
     model = model.to(device)
     loss_fn = nn.MSELoss(reduction='sum').to(device)
-    optimizer = torch.optim.SGD(model.parameters(), lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     metrics_csv = os.path.join(run_dir, f"{save_as}_metrics.csv")
     metrics_img = os.path.join(run_dir, f"{save_as}_metrics.pdf")
@@ -214,32 +215,55 @@ def epoch_iteration(model, loss_fn, optimizer, data_loader, epoch, max_batch, de
 
 if __name__=='__main__':
 
-    # Data/results directories
-    data_dir = os.path.join(os.path.dirname(__file__), f'../../../data/dms') 
-    results_dir = os.path.join(os.path.dirname(__file__), f'../../../results/run_results/blstm-NLP_preembedded')
-
-    # Create run directory for results
-    now = datetime.datetime.now()
-    date_hour_minute = now.strftime("%Y-%m-%d_%H-%M")
-    run_dir = os.path.join(results_dir, f"blstm-NLP_preembedded-DMS_OLD_BE-{date_hour_minute}")
-    os.makedirs(run_dir, exist_ok = True)
-
     # Run setup
     n_epochs = 1000
     batch_size = 64
     max_batch = -1
-    num_workers = 64
+    num_workers = 4
     lr = 1e-5
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    # Create Dataset and DataLoader
+    # Data/results directories
+    data_dir = os.path.join(os.path.dirname(__file__), f'../../../data/dms') 
+    results_dir = os.path.join(os.path.dirname(__file__), f'../../../results/run_results/blstm-ESM_AA_preembedded')
+
+    # Create run directory for results
+    now = datetime.datetime.now()
+    date_hour_minute = now.strftime("%Y-%m-%d_%H-%M")
+    run_dir = os.path.join(results_dir, f"adam.lr{lr}.blstm_BE-ESM_AA_preembedded-DMS_OLD-{date_hour_minute}")
+    os.makedirs(run_dir, exist_ok = True)
+
+   # Create Dataset and DataLoader
     torch.manual_seed(0)
 
-    train_dataset = DMSEmbeddedDataset_BE(os.path.join(data_dir, "parquets/mutation_combined_DMS_OLD_train_NLP-embedded.parquet"))
-    train_data_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=False, num_workers=num_workers, pin_memory=True)
+    def seed_worker(worker_id):
+        worker_seed = torch.initial_seed() % 2**32
+        np.random.seed(worker_seed)
+        random.seed(worker_seed)
 
-    test_dataset = DMSEmbeddedDataset_BE(os.path.join(data_dir, "parquets/mutation_combined_DMS_OLD_test_NLP-embedded.parquet"))
-    test_data_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, drop_last=False, num_workers=num_workers, pin_memory=True)
+    train_dataset = DMSEmbeddedDataset_BE(os.path.join(data_dir, "pt/mutation_combined_DMS_OLD_train_ESM-AA-embedded.pt"))
+    train_data_loader = DataLoader(
+        train_dataset, 
+        batch_size=batch_size, 
+        shuffle=True, 
+        drop_last=False, 
+        num_workers=num_workers, 
+        worker_init_fn=seed_worker, 
+        generator=torch.Generator().manual_seed(0), 
+        pin_memory=True
+    )
+
+    test_dataset = DMSEmbeddedDataset_BE(os.path.join(data_dir, "pt/mutation_combined_DMS_OLD_test_ESM-AA-embedded.pt"))
+    test_data_loader = DataLoader(
+        test_dataset, 
+        batch_size=batch_size, 
+        shuffle=True, 
+        drop_last=False, 
+        num_workers=num_workers, 
+        worker_init_fn=seed_worker, 
+        generator=torch.Generator().manual_seed(0), 
+        pin_memory=True
+    )
 
     # BLSTM input
     size = 320
@@ -255,5 +279,5 @@ if __name__=='__main__':
     count_parameters(model)
     saved_model_pth = None
     from_checkpoint = False
-    save_as = f"blstm-NLP_preembedded-DMS_OLD_BE-train_{len(train_dataset)}_test_{len(test_dataset)}"
+    save_as = f"blstm_BE-ESM_AA_preembedded-DMS_OLD-train_{len(train_dataset)}_test_{len(test_dataset)}"
     run_model(model, train_data_loader, test_data_loader, n_epochs, lr, max_batch, device, run_dir, save_as, saved_model_pth, from_checkpoint)
