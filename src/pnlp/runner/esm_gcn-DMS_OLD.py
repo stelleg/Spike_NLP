@@ -28,18 +28,18 @@ from runner_util_dms import (
 )
 
 class GraphSAGE(nn.Module):
-    """ GraphSAGE. """
-
-    def __init__(self, input_channels, hidden_channels, output_channels):
+    def __init__(self, input_channels, hidden_channels):
         super(GraphSAGE, self).__init__()
         self.conv1 = SAGEConv(input_channels, hidden_channels)
-        self.conv2 = SAGEConv(hidden_channels, output_channels)
+        self.conv2 = SAGEConv(hidden_channels, hidden_channels)
+        self.output = nn.Linear(hidden_channels, 1)
 
     def forward(self, x, edge_index, batch):
         x = self.conv1(x, edge_index).relu()
-        x = self.conv2(x, edge_index)
+        x = self.conv2(x, edge_index).relu()
         x = global_mean_pool(x, batch)
-        return x
+        output = self.output(x).squeeze(1)
+        return output
 
 class ESM_GCN(nn.Module):
     def __init__(self, esm, gcn):
@@ -61,11 +61,10 @@ class ESM_GCN(nn.Module):
                 graphs.append(Data(
                     x=embedding, 
                     edge_index=edge_index,
-                    y = target.view(-1, 1)
+                    y=torch.tensor([target], dtype=torch.float32)
                 ))
-            batch_graph = Batch.from_data_list(graphs)
-            batch_graph = batch_graph.to(next(self.gcn.parameters()).device)
 
+            batch_graph = Batch.from_data_list(graphs).to(device)
             output = self.gcn(batch_graph.x, batch_graph.edge_index, batch_graph.batch)
 
         return output, batch_graph.y
@@ -253,8 +252,7 @@ if __name__=='__main__':
     size = 320
     input_channels = size # Number of input channels (dimensions of the embeddings)
     hidden_channels = size
-    out_channels = 1  # For regression output
-    gcn = GraphSAGE(input_channels, hidden_channels, out_channels)
+    gcn = GraphSAGE(input_channels, hidden_channels)
 
     model = ESM_GCN(esm, gcn)
 

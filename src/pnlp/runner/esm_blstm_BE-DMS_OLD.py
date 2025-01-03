@@ -130,7 +130,7 @@ def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: i
 
     for epoch in range(starting_epoch, n_epochs + 1):
         train_binding_mse, train_binding_rmse, train_expression_mse, train_expression_rmse, train_be_mse, train_be_rmse = epoch_iteration(model, tokenizer, loss_fn, optimizer, train_data_loader, epoch, max_batch, device, mode='train')
-        test_binding_mse, test_binding_rmse, test_expression_mse, test_expression_rmse, test_be_mse, test_be_rmse = epoch_iteration(model, tokenizer, loss_fn, optimizer, train_data_loader, epoch, max_batch, device, mode='test')
+        test_binding_mse, test_binding_rmse, test_expression_mse, test_expression_rmse, test_be_mse, test_be_rmse = epoch_iteration(model, tokenizer, loss_fn, optimizer, test_data_loader, epoch, max_batch, device, mode='test')
 
         print(f'Epoch {epoch} | Train Binding RMSE: {train_binding_rmse:.4f}, Train Expression RMSE: {train_expression_rmse:.4f}, Train BE RMSE: {train_be_rmse:.4f}') 
         print(f'{" "*(8+len(str(epoch)))} Test Binding RMSE: {test_binding_rmse:.4f}, Test Expression RMSE: {test_expression_rmse:.4f}, Test BE RMSE: {test_be_rmse:.4f}') 

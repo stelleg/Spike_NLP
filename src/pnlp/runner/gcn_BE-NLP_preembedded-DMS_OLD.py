@@ -28,19 +28,19 @@ from runner_util_dms import (
 )
 
 class GraphSAGE(nn.Module):
-    def __init__(self, input_channels, hidden_channels, output_channels):
+    def __init__(self, input_channels, hidden_channels):
         super(GraphSAGE, self).__init__()
         self.conv1 = SAGEConv(input_channels, hidden_channels)
-        self.conv2 = SAGEConv(hidden_channels, output_channels)
-        self.binding_output = nn.Linear(hidden_channels, output_channels)
-        self.expression_output = nn.Linear(hidden_channels, output_channels)
+        self.conv2 = SAGEConv(hidden_channels, hidden_channels)
+        self.binding_output = nn.Linear(hidden_channels, 1)
+        self.expression_output = nn.Linear(hidden_channels, 1)
 
     def forward(self, x, edge_index, batch):
         x = self.conv1(x, edge_index).relu()
-        x = self.conv2(x, edge_index)
+        x = self.conv2(x, edge_index).relu()
         x = global_mean_pool(x, batch)
-        binding_output = self.binding_output(x)
-        expression_output = self.expression_output(x)
+        binding_output = self.binding_output(x).squeeze(1)
+        expression_output = self.expression_output(x).squeeze(1)
         return binding_output, expression_output
 
 # MODEL RUNNING
@@ -163,8 +163,7 @@ def epoch_iteration(model, loss_fn, optimizer, data_loader, epoch, max_batch, de
                 y=torch.tensor([[b_target, e_target]], dtype=torch.float32)  # Add an extra dimension
             ))
         
-        batch_graph = Batch.from_data_list(graphs)
-        batch_graph = batch_graph.to(next(model.parameters()).device)
+        batch_graph = Batch.from_data_list(graphs).to(device)
 
         if mode == 'train':
             optimizer.zero_grad()
@@ -203,7 +202,7 @@ def epoch_iteration(model, loss_fn, optimizer, data_loader, epoch, max_batch, de
 if __name__=='__main__':
 
     # Run setup
-    n_epochs = 2
+    n_epochs = 1000
     batch_size = 64
     max_batch = -1
     num_workers = 4
@@ -212,12 +211,12 @@ if __name__=='__main__':
 
     # Data/results directories
     data_dir = os.path.join(os.path.dirname(__file__), f'../../../data/dms') 
-    results_dir = os.path.join(os.path.dirname(__file__), f'../../../results/run_results/gcn-ESM_AA_preembedded')
+    results_dir = os.path.join(os.path.dirname(__file__), f'../../../results/run_results/gcn-NLP_preembedded')
 
     # Create run directory for results
     now = datetime.datetime.now()
     date_hour_minute = now.strftime("%Y-%m-%d_%H-%M")
-    run_dir = os.path.join(results_dir, f"adam.lr{lr}.gcn_BE-ESM_AA_preembedded-DMS_OLD-{date_hour_minute}")
+    run_dir = os.path.join(results_dir, f"adam.lr{lr}.gcn_BE-NLP_preembedded-DMS_OLD-{date_hour_minute}")
     os.makedirs(run_dir, exist_ok = True)
 
    # Create Dataset and DataLoader
@@ -228,7 +227,7 @@ if __name__=='__main__':
         np.random.seed(worker_seed)
         random.seed(worker_seed)
 
-    train_dataset = DMSEmbeddedDataset_BE(os.path.join(data_dir, "pt/mutation_combined_DMS_OLD_train_ESM-AA-embedded.pt"))
+    train_dataset = DMSEmbeddedDataset_BE(os.path.join(data_dir, "pt/mutation_combined_DMS_OLD_train_NLP-embedded.pt"))
     train_data_loader = DataLoader(
         train_dataset, 
         batch_size=batch_size, 
@@ -240,7 +239,7 @@ if __name__=='__main__':
         pin_memory=True
     )
 
-    test_dataset = DMSEmbeddedDataset_BE(os.path.join(data_dir, "pt/mutation_combined_DMS_OLD_test_ESM-AA-embedded.pt"))
+    test_dataset = DMSEmbeddedDataset_BE(os.path.join(data_dir, "pt/mutation_combined_DMS_OLD_test_NLP-embedded.pt"))
     test_data_loader = DataLoader(
         test_dataset, 
         batch_size=batch_size, 
@@ -256,12 +255,11 @@ if __name__=='__main__':
     size = 320
     input_channels = size # Number of input channels (dimensions of the embeddings)
     hidden_channels = size
-    out_channels = 1  # For regression outputs
-    model = GraphSAGE(input_channels, hidden_channels, out_channels)
+    model = GraphSAGE(input_channels, hidden_channels)
 
     # Run
     count_parameters(model)
     saved_model_pth = None
     from_checkpoint = False
-    save_as = f"gcn_BE-ESM_AA_preembedded-DMS_OLD-train_{len(train_dataset)}_test_{len(test_dataset)}"
+    save_as = f"gcn_BE-NLP_preembedded-DMS_OLD-train_{len(train_dataset)}_test_{len(test_dataset)}"
     run_model(model, train_data_loader, test_data_loader, n_epochs, lr, max_batch, device, run_dir, save_as, saved_model_pth, from_checkpoint)

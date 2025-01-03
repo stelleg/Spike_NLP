@@ -28,18 +28,18 @@ from runner_util_dms import (
 )
 
 class GraphSAGE(nn.Module):
-    """ GraphSAGE. """
-
-    def __init__(self, input_channels, hidden_channels, output_channels):
+    def __init__(self, input_channels, hidden_channels):
         super(GraphSAGE, self).__init__()
         self.conv1 = SAGEConv(input_channels, hidden_channels)
-        self.conv2 = SAGEConv(hidden_channels, output_channels)
+        self.conv2 = SAGEConv(hidden_channels, hidden_channels)
+        self.output = nn.Linear(hidden_channels, 1)
 
     def forward(self, x, edge_index, batch):
         x = self.conv1(x, edge_index).relu()
-        x = self.conv2(x, edge_index)
+        x = self.conv2(x, edge_index).relu()
         x = global_mean_pool(x, batch)
-        return x
+        output = self.output(x).squeeze(1)
+        return output
 
 # MODEL RUNNING
 def run_model(model, train_data_loader, test_data_loader, n_epochs: int, lr:float, max_batch: Union[int, None], device: str, run_dir: str, save_as: str, saved_model_pth:str=None, from_checkpoint:bool=False):
@@ -147,7 +147,7 @@ def epoch_iteration(model, loss_fn, optimizer, data_loader, epoch, max_batch, de
             graphs.append(Data(
                 x=embedding, 
                 edge_index=edge_index,
-                y = target.view(-1, 1)
+                y=torch.tensor([target], dtype=torch.float32)
             ))
         batch_graph = Batch.from_data_list(graphs).to(device)
    
@@ -231,8 +231,7 @@ if __name__=='__main__':
     size = 320
     input_channels = size # Number of input channels (dimensions of the embeddings)
     hidden_channels = size
-    out_channels = 1  # For regression output
-    model = GraphSAGE(input_channels, hidden_channels, out_channels)
+    model = GraphSAGE(input_channels, hidden_channels)
 
     # Run
     count_parameters(model)

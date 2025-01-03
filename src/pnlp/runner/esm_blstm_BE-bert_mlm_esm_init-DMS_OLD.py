@@ -75,14 +75,20 @@ class BLSTM(nn.Module):
 
 # ESM-BLSTM
 class ESM_BLSTM(nn.Module):
-    def __init__(self, esm, blstm):
+    def __init__(self, esm, blstm, embedding_weights):
         super().__init__()
         self.esm = esm
         self.blstm = blstm
 
-    def forward(self, tokenized_seqs):
+        # Before assigning embedding weights
+        print("Before assignment:", self.esm.embeddings.word_embeddings.weight.data[:5])
+        self.esm.embeddings.word_embeddings.weight.data = embedding_weights
+        # After assigning embedding weights
+        print("After assignment:", self.esm.embeddings.word_embeddings.weight.data[:5])
+
+    def forward(self, x):
         with torch.set_grad_enabled(self.training):  # Enable gradients, managed by model.eval() or model.train() in epoch_iteration
-            esm_last_hidden_state = self.esm(**tokenized_seqs).last_hidden_state # shape: [batch_size, sequence_length, embedding_dim]
+            esm_last_hidden_state = self.esm(**x).last_hidden_state # shape: [batch_size, sequence_length, embedding_dim]
             esm_aa_embedding = esm_last_hidden_state[:, 1:-1, :] # Amino Acid-level representations, [batch_size, sequence_length-2, embedding_dim], excludes 1st and last tokens
             binding_preds, expression_preds = self.blstm(esm_aa_embedding)
         return binding_preds, expression_preds
@@ -131,7 +137,7 @@ def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: i
 
     for epoch in range(starting_epoch, n_epochs + 1):
         train_binding_mse, train_binding_rmse, train_expression_mse, train_expression_rmse, train_be_mse, train_be_rmse = epoch_iteration(model, tokenizer, loss_fn, optimizer, train_data_loader, epoch, max_batch, device, mode='train')
-        test_binding_mse, test_binding_rmse, test_expression_mse, test_expression_rmse, test_be_mse, test_be_rmse = epoch_iteration(model, tokenizer, loss_fn, optimizer, train_data_loader, epoch, max_batch, device, mode='test')
+        test_binding_mse, test_binding_rmse, test_expression_mse, test_expression_rmse, test_be_mse, test_be_rmse = epoch_iteration(model, tokenizer, loss_fn, optimizer, test_data_loader, epoch, max_batch, device, mode='test')
 
         print(f'Epoch {epoch} | Train Binding RMSE: {train_binding_rmse:.4f}, Train Expression RMSE: {train_expression_rmse:.4f}, Train BE RMSE: {train_be_rmse:.4f}') 
         print(f'{" "*(8+len(str(epoch)))} Test Binding RMSE: {test_binding_rmse:.4f}, Test Expression RMSE: {test_expression_rmse:.4f}, Test BE RMSE: {test_be_rmse:.4f}') 

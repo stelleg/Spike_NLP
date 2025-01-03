@@ -28,19 +28,19 @@ from runner_util_dms import (
 )
 
 class GraphSAGE(nn.Module):
-    def __init__(self, input_channels, hidden_channels, output_channels):
+    def __init__(self, input_channels, hidden_channels):
         super(GraphSAGE, self).__init__()
         self.conv1 = SAGEConv(input_channels, hidden_channels)
         self.conv2 = SAGEConv(hidden_channels, hidden_channels)
-        self.binding_output = nn.Linear(hidden_channels, output_channels)
-        self.expression_output = nn.Linear(hidden_channels, output_channels)
+        self.binding_output = nn.Linear(hidden_channels, 1)
+        self.expression_output = nn.Linear(hidden_channels, 1)
 
     def forward(self, x, edge_index, batch):
         x = self.conv1(x, edge_index).relu()
-        x = self.conv2(x, edge_index)
+        x = self.conv2(x, edge_index).relu()
         x = global_mean_pool(x, batch)
-        binding_output = self.binding_output(x)
-        expression_output = self.expression_output(x)
+        binding_output = self.binding_output(x).squeeze(1)
+        expression_output = self.expression_output(x).squeeze(1)
         return binding_output, expression_output
 
 class ESM_GCN(nn.Module):
@@ -50,10 +50,11 @@ class ESM_GCN(nn.Module):
         self.gcn = gcn
 
     def forward(self, tokenized_seqs, binding_targets, expression_targets):
-        with torch.set_grad_enabled(self.training):
-            esm_last_hidden_state = self.esm(**tokenized_seqs).last_hidden_state
-            esm_aa_embedding = esm_last_hidden_state[:, 1:-1, :]
+        with torch.set_grad_enabled(self.training):  # Enable gradients, managed by model.eval() or model.train() in epoch_iteration
+            esm_last_hidden_state = self.esm(**tokenized_seqs).last_hidden_state # shape: [batch_size, sequence_length, embedding_dim]
+            esm_aa_embedding = esm_last_hidden_state[:, 1:-1, :] # Amino Acid-level representations, [batch_size, sequence_length-2, embedding_dim], excludes 1st and last tokens
             
+            # Graph Construction
             graphs = []
             for embedding, b_target, e_target in zip(esm_aa_embedding, binding_targets, expression_targets):
                 edges = [(i, i+1) for i in range(embedding.size(0) - 1)]
@@ -64,11 +65,10 @@ class ESM_GCN(nn.Module):
                     y=torch.tensor([[b_target, e_target]], dtype=torch.float32)  # Add an extra dimension
                 ))
             
-            batch_graph = Batch.from_data_list(graphs)
-            batch_graph = batch_graph.to(next(self.gcn.parameters()).device)
-            
+            batch_graph = Batch.from_data_list(graphs).to(device)
             binding_output, expression_output = self.gcn(batch_graph.x, batch_graph.edge_index, batch_graph.batch)
-            return binding_output, expression_output, batch_graph.y[:, 0], batch_graph.y[:, 1]
+
+        return binding_output, expression_output, batch_graph.y
 
 # MODEL RUNNING
 def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: int, lr:float, max_batch: Union[int, None], device: str, run_dir: str, save_as: str, saved_model_pth:str=None, from_checkpoint:bool=False):
@@ -105,43 +105,43 @@ def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: i
         else: 
             fa.write((
                 "Epoch,"
-                "Train Binding MSE,Train Binding RMSE,Train Expression MSE,Train Expression RMSE,Train MSE,Train RMSE,"
-                "Test Binding MSE,Test Binding RMSE,Test Expression MSE,Test Expression RMSE,Test MSE,Test RMSE\n"
+                "Train Binding MSE,Train Binding RMSE,Train Expression MSE,Train Expression RMSE,Train BE MSE,Train BE RMSE,"
+                "Test Binding MSE,Test Binding RMSE,Test Expression MSE,Test Expression RMSE,Test BE MSE,Test BE RMSE\n"
             ))
 
     # Running
     start_time = time.time()
 
     for epoch in range(starting_epoch, n_epochs + 1):
-        train_binding_mse, train_binding_rmse, train_expression_mse, train_expression_rmse, train_mse, train_rmse = epoch_iteration(model, tokenizer, loss_fn, optimizer, train_data_loader, epoch, max_batch, device, mode='train')
-        test_binding_mse, test_binding_rmse, test_expression_mse, test_expression_rmse, test_mse, test_rmse = epoch_iteration(model, tokenizer, loss_fn, optimizer, test_data_loader, epoch, max_batch, device, mode='test')
+        train_binding_mse, train_binding_rmse, train_expression_mse, train_expression_rmse, train_be_mse, train_be_rmse = epoch_iteration(model, tokenizer, loss_fn, optimizer, train_data_loader, epoch, max_batch, device, mode='train')
+        test_binding_mse, test_binding_rmse, test_expression_mse, test_expression_rmse, test_be_mse, test_be_rmse = epoch_iteration(model, tokenizer, loss_fn, optimizer, test_data_loader, epoch, max_batch, device, mode='test')
 
-        print(f'Epoch {epoch} | Train Binding RMSE: {train_binding_rmse:.4f}, Train Expression RMSE: {train_expression_rmse:.4f}, Train RMSE: {train_rmse:.4f}') 
-        print(f'{" "*(8+len(str(epoch)))} Test Binding RMSE: {test_binding_rmse:.4f}, Test Expression RMSE: {test_expression_rmse:.4f}, Test RMSE: {test_rmse:.4f}') 
+        print(f'Epoch {epoch} | Train Binding RMSE: {train_binding_rmse:.4f}, Train Expression RMSE: {train_expression_rmse:.4f}, Train BE RMSE: {train_be_rmse:.4f}') 
+        print(f'{" "*(8+len(str(epoch)))} Test Binding RMSE: {test_binding_rmse:.4f}, Test Expression RMSE: {test_expression_rmse:.4f}, Test BE RMSE: {test_be_rmse:.4f}') 
 
         with open(metrics_csv, "a") as fa:         
             fa.write((
                 f"{epoch}," 
-                f"{train_binding_mse}, {train_binding_rmse}, {train_expression_mse}, {train_expression_rmse}, {train_mse}, {train_rmse},"
-                f"{test_binding_mse}, {test_binding_rmse}, {test_expression_mse}, {test_expression_rmse}, {test_mse}, {test_rmse}\n"
+                f"{train_binding_mse}, {train_binding_rmse}, {train_expression_mse}, {train_expression_rmse}, {train_be_mse}, {train_be_rmse},"
+                f"{test_binding_mse}, {test_binding_rmse}, {test_expression_mse}, {test_expression_rmse}, {test_be_mse}, {test_be_rmse}\n"
             ))                
             fa.flush()
 
         # Save best
-        if test_rmse < best_rmse:
-            best_rmse = test_rmse
+        if test_be_rmse < best_rmse:
+            best_rmse = test_be_rmse
             model_path = os.path.join(run_dir, f'best_saved_model.pth')
             print(f"NEW BEST model: RMSE loss {best_rmse:.4f}")
-            save_model(model, optimizer, model_path, epoch, test_rmse)
+            save_model(model, optimizer, model_path, epoch, test_be_rmse)
         
         # Save every 100 epochs
         if epoch > 0 and epoch % 100 == 0:
             model_path = os.path.join(run_dir, f'saved_model-epoch_{epoch}.pth')
-            save_model(model, optimizer, model_path, epoch, test_rmse)
+            save_model(model, optimizer, model_path, epoch, test_be_rmse)
 
         # Save checkpoint 
         model_path = os.path.join(run_dir, f'checkpoint_saved_model.pth')
-        save_model(model, optimizer, model_path, epoch, test_rmse)
+        save_model(model, optimizer, model_path, epoch, test_be_rmse)
             
         print("")
         
@@ -163,7 +163,9 @@ def epoch_iteration(model, tokenizer, loss_fn, optimizer, data_loader, epoch, ma
                           total=len(data_loader),
                           bar_format='{l_bar}{r_bar}')
 
-    total_binding_loss, total_expression_loss, total_loss = 0, 0, 0
+    total_binding_loss = 0
+    total_expression_loss = 0
+    total_be_loss = 0
     total_items = 0
 
     # Set max_batch if None
@@ -177,26 +179,26 @@ def epoch_iteration(model, tokenizer, loss_fn, optimizer, data_loader, epoch, ma
         seq_ids, seqs, binding_targets, expression_targets = batch_data
         binding_targets, expression_targets = binding_targets.to(device).float(), expression_targets.to(device).float()
         tokenized_seqs = tokenizer(seqs, return_tensors="pt").to(device)
-
+   
         if mode == 'train':
             optimizer.zero_grad()
-            binding_preds, expression_preds, batch_binding_targets, batch_expression_targets = model(tokenized_seqs, binding_targets, expression_targets)
-            binding_loss = loss_fn(binding_preds[:, 0], batch_binding_targets)
-            expression_loss = loss_fn(expression_preds[:, 1], batch_expression_targets)
-            batch_loss = binding_loss + expression_loss
-            batch_loss.backward()
+            binding_preds, expression_preds, y = model(tokenized_seqs, binding_targets, expression_targets)
+            binding_loss = loss_fn(binding_preds, y[:, 0])
+            expression_loss = loss_fn(expression_preds,  y[:, 1])
+            batch_be_loss = binding_loss + expression_loss
+            batch_be_loss.backward()
             optimizer.step()
 
         else:
             with torch.no_grad():
-                binding_preds, expression_preds, batch_binding_targets, batch_expression_targets = model(tokenized_seqs, binding_targets, expression_targets)
-                binding_loss = loss_fn(binding_preds[:, 0], batch_binding_targets)
-                expression_loss = loss_fn(expression_preds[:, 1], batch_expression_targets)
-                batch_loss = binding_loss + expression_loss
+                binding_preds, expression_preds, y = model(tokenized_seqs, binding_targets, expression_targets)
+                binding_loss = loss_fn(binding_preds, y[:, 0])
+                expression_loss = loss_fn(expression_preds,  y[:, 1])
+                batch_be_loss = binding_loss + expression_loss
 
         total_binding_loss += binding_loss.item()
         total_expression_loss += expression_loss.item()
-        total_loss += batch_loss.item()
+        total_be_loss += batch_be_loss.item()
         total_items += binding_targets.size(0)  # same size as expression_targets.size(0)
     
     # total loss is the sum of squared errors over items encountered
@@ -204,26 +206,26 @@ def epoch_iteration(model, tokenizer, loss_fn, optimizer, data_loader, epoch, ma
     # we get mse and rmse per item
     binding_mse = total_binding_loss/total_items
     expression_mse = total_expression_loss/total_items
-    mse = total_loss/total_items
+    be_mse = total_be_loss/total_items
 
     binding_rmse = np.sqrt(binding_mse)
     expression_rmse = np.sqrt(expression_mse)
-    rmse = np.sqrt(mse)
+    be_rmse = np.sqrt(be_mse)
 
-    return binding_mse, binding_rmse, expression_mse, expression_rmse, mse, rmse
-      
+    return binding_mse, binding_rmse, expression_mse, expression_rmse, be_mse, be_rmse
+
 if __name__=='__main__':
 
     # Run setup
-    n_epochs = 1000
+    n_epochs = 2
     batch_size = 64
     max_batch = -1
     num_workers = 4
-    lr = 1e-4
-    device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
+    lr = 1e-5
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Data/results directories
-    data_dir = os.path.join(os.path.dirname(__file__), f'../../../data/dms')
+    data_dir = os.path.join(os.path.dirname(__file__), f'../../../data/dms') 
     results_dir = os.path.join(os.path.dirname(__file__), f'../../../results/run_results/esm_gcn')
 
     # Create run directory for results
@@ -273,8 +275,7 @@ if __name__=='__main__':
     size = 320
     input_channels = size # Number of input channels (dimensions of the embeddings)
     hidden_channels = size
-    out_channels = 2  # For regression outputs
-    gcn = GraphSAGE(input_channels, hidden_channels, out_channels)
+    gcn = GraphSAGE(input_channels, hidden_channels)
 
     model = ESM_GCN(esm, gcn)
 
@@ -282,5 +283,5 @@ if __name__=='__main__':
     count_parameters(model)
     saved_model_pth = None
     from_checkpoint = False
-    save_as = f"esm_gcn_BE-DMS_OLD-train_{len(train_dataset)}_test_{len(test_dataset)}"
+    save_as = f"esm_gcn_BE-DMS_OLD_BE-train_{len(train_dataset)}_test_{len(test_dataset)}"
     run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs, lr, max_batch, device, run_dir, save_as, saved_model_pth, from_checkpoint)
