@@ -9,3 +9,6 @@
 # Files are too big for github
 esm_blstm/**/*.pth
 esm_blstm-bert_mlm_esm_init/**/*.pth
+
+bert_mlm-esm_init/adam.lr1e-05.5120.bert_mlm-esm_init-RBD-2024-12-24_19-47
+bert_mlm-esm_init/5120_screen_log.txt
