@@ -217,7 +217,7 @@ def epoch_iteration(model, tokenizer, loss_fn, optimizer, data_loader, epoch, ma
 if __name__=='__main__':
 
     # Run setup
-    n_epochs = 2
+    n_epochs = 1000
     batch_size = 64
     max_batch = -1
     num_workers = 4
