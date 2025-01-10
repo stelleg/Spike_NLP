@@ -124,8 +124,8 @@ def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: i
         with open(metrics_csv, "a") as fa:         
             fa.write((
                 f"{epoch}," 
-                f"{train_binding_mse}, {train_binding_rmse}, {train_expression_mse}, {train_expression_rmse}, {train_be_mse}, {train_be_rmse},"
-                f"{test_binding_mse}, {test_binding_rmse}, {test_expression_mse}, {test_expression_rmse}, {test_be_mse}, {test_be_rmse}\n"
+                f"{train_binding_mse},{train_binding_rmse},{train_expression_mse},{train_expression_rmse},{train_be_mse},{train_be_rmse},"
+                f"{test_binding_mse},{test_binding_rmse},{test_expression_mse},{test_expression_rmse},{test_be_mse},{test_be_rmse}\n"
             ))                
             fa.flush()
 
