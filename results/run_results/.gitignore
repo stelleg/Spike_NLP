@@ -6,6 +6,9 @@
 !bert_mlm/**/saved_model-epoch_100.pth
 !bert_mlm-esm_init/**/saved_model-epoch_100.pth
 
+# Ignore single relu pth files
+*/single_relu-*/*.pth
+
 # Files are too big for github
 esm_blstm/**/*.pth
 esm_blstm-bert_mlm_esm_init/**/*.pth
