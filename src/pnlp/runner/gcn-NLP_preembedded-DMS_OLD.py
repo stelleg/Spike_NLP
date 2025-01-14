@@ -35,7 +35,7 @@ class GraphSAGE(nn.Module):
         self.output = nn.Linear(hidden_channels, 1)
 
     def forward(self, x, edge_index, batch):
-        x = self.conv1(x, edge_index).relu()
+        x = self.conv1(x, edge_index)
         x = self.conv2(x, edge_index).relu()
         x = global_mean_pool(x, batch)
         output = self.output(x).squeeze(1)
