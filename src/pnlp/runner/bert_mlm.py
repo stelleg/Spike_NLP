@@ -32,6 +32,7 @@ from runner_util_rbd_bert_mlm import (
 def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: int, lr:float, max_batch: Union[int, None], device: str, run_dir: str, save_as: str, saved_model_pth:str=None, from_checkpoint:bool=False):
     """ Run a model through train and test epochs. """
 
+    start_time = time.time()
     model = model.to(device)
     loss_fn = nn.CrossEntropyLoss(reduction='sum').to(device)  # sum of CEL at batch level.
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, betas=(0.9, 0.999), weight_decay=0.01)
@@ -73,15 +74,14 @@ def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: i
         else: fa.write(f"Epoch,Train Accuracy,Train Loss,Test Accuracy,Test Loss\n")
 
     # Running
-    start_time = time.time()
-
     for epoch in range(starting_epoch, n_epochs + 1):
+        epoch_start_time = time.time()
         train_accuracy, train_loss = epoch_iteration(model, tokenizer, loss_fn, scheduler, train_data_loader, epoch, max_batch, device, mode='train')
         test_accuracy, test_loss, aa_pred_counter = epoch_iteration(model, tokenizer, loss_fn, scheduler, test_data_loader, epoch, max_batch, device, mode='test')
 
         print(f'Epoch {epoch} | Train Accuracy: {train_accuracy:.4f}, Train Loss: {train_loss:.4f}')
         print(f'{" "*(7+len(str(epoch)))}| Test Accuracy: {test_accuracy:.4f}, Test Loss: {test_loss:.4f}\n') 
-        
+
         with open(metrics_csv, "a") as fa:         
             fa.write(f"{epoch},{train_accuracy},{train_loss},{test_accuracy},{test_loss}\n")
             fa.flush()
@@ -108,7 +108,11 @@ def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: i
         model_path = os.path.join(run_dir, f'checkpoint_saved_model.pth')
         save_model(model, optimizer, scheduler, model_path, epoch, test_accuracy, test_loss)
             
-        print("")
+        end_time = time.time()
+        epoch_duration = end_time - epoch_start_time
+        total_duration = end_time - start_time
+        print(f'> Epoch elapsed time: {str(datetime.timedelta(seconds=epoch_duration))} (D, H:MM:SS.ms)')
+        print(f'> Current total elapsed time: {str(datetime.timedelta(seconds=total_duration))} (D, H:MM:SS.ms)\n')
 
     # Write amino acid predictions
     with open(preds_csv, 'w') as fb:
@@ -123,11 +127,9 @@ def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: i
     plot_log_file(metrics_csv, metrics_img)
     plot_aa_preds_heatmap(preds_csv, preds_img)
 
-    # End timer and print duration
     end_time = time.time()
-    duration = end_time - start_time
-    formatted_duration = str(datetime.timedelta(seconds=duration))
-    print(f'Training and testing complete in: {formatted_duration} (D day(s), H:MM:SS.microseconds)')
+    total_duration = end_time - start_time
+    print(f'== Total elapsed time: {str(datetime.timedelta(seconds=total_duration))} (D, H:MM:SS.ms) ==')
 
 def epoch_iteration(model, tokenizer, loss_fn, scheduler, data_loader, epoch, max_batch, device, mode):
     """ Used in run_model. """
