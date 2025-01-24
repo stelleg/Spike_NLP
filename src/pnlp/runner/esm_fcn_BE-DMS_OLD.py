@@ -85,6 +85,8 @@ def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: i
 
     starting_epoch = 1
     best_rmse = float('inf')
+    best_binding_rmse = float('inf')
+    best_expression_rmse = float('inf')
 
     # Load saved model
     if saved_model_pth is not None and os.path.exists(saved_model_pth):
@@ -135,6 +137,18 @@ def run_model(model, tokenizer, train_data_loader, test_data_loader, n_epochs: i
             model_path = os.path.join(run_dir, f'best_saved_model.pth')
             print(f"NEW BEST model: RMSE loss {best_rmse:.4f}")
             save_model(model, optimizer, model_path, epoch, test_be_rmse)
+
+        if test_binding_rmse < best_binding_rmse:
+            best_binding_rmse = test_binding_rmse
+            model_path = os.path.join(run_dir, f'best_saved_binding_model.pth')
+            print(f"NEW BEST binding model: RMSE loss {best_binding_rmse:.4f}")
+            save_model(model, optimizer, model_path, epoch, test_binding_rmse)
+
+        # if test_expression_rmse < best_expression_rmse:
+        #     best_expression_rmse = test_expression_rmse
+        #     model_path = os.path.join(run_dir, f'best_saved_expression_model.pth')
+        #     print(f"NEW BEST expression model: RMSE loss {best_expression_rmse:.4f}")
+        #     save_model(model, optimizer, model_path, epoch, test_expression_rmse)
         
         # Save every 100 epochs
         if epoch > 0 and epoch % 100 == 0:
@@ -219,11 +233,11 @@ def epoch_iteration(model, tokenizer, loss_fn, optimizer, data_loader, epoch, ma
 if __name__=='__main__':
 
     # Run setup
-    n_epochs = 1000
+    n_epochs = 100
     batch_size = 64
     max_batch = -1
     num_workers = 4
-    lr = 1e-5
+    lr = 1e-4
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Data/results directories
@@ -233,7 +247,7 @@ if __name__=='__main__':
     # Create run directory for results
     now = datetime.datetime.now()
     date_hour_minute = now.strftime("%Y-%m-%d_%H-%M")
-    run_dir = os.path.join(results_dir, f"adam.lr{lr}.esm_fcn_BE-DMS_OLD-{date_hour_minute}")
+    run_dir = os.path.join(results_dir, f"binding_test-adam.lr{lr}.esm_fcn_BE-DMS_OLD-{date_hour_minute}")
     os.makedirs(run_dir, exist_ok = True)
 
     # Create Dataset and DataLoader
