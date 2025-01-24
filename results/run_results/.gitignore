@@ -2,12 +2,13 @@
 *saved_model-epoch_[0-9].pth
 *saved_model-epoch_[0-9][0-9].pth
 *saved_model-epoch_[0-9][0-9][0-9].pth
+*saved_model-epoch_[0-9][0-9][0-9][0-9].pth
+*checkpoint_saved_model.pth
 
 !bert_mlm/**/saved_model-epoch_100.pth
+!bert_mlm/**/checkpoint_saved_model.pth
 !bert_mlm-esm_init/**/saved_model-epoch_100.pth
-
-# Ignore single relu pth files
-*/single_relu-*/*.pth
+!bert_mlm-esm_init/**/checkpoint_saved_model.pth
 
 # Files are too big for github
 esm_blstm/**/*.pth

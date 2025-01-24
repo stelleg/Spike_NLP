@@ -198,7 +198,7 @@ if __name__=='__main__':
 
     # Run setup
     n_epochs = 100
-    batch_size = 32
+    batch_size = 64
     max_batch = -1
     num_workers = 4
     lr = 1e-5
@@ -211,7 +211,7 @@ if __name__=='__main__':
     # Create run directory for results
     now = datetime.datetime.now()
     date_hour_minute = now.strftime("%Y-%m-%d_%H-%M")
-    run_dir = os.path.join(results_dir, f"adam.lr{lr}.5120.bert_mlm-esm_init-RBD-{date_hour_minute}")
+    run_dir = os.path.join(results_dir, f"adam.lr{lr}.bert_mlm-esm_init-RBD-{date_hour_minute}")
     os.makedirs(run_dir, exist_ok = True)
 
     # Create Dataset and DataLoader
@@ -249,13 +249,13 @@ if __name__=='__main__':
     # BERT input
     max_len = 280
     mask_prob = 0.15
-    embedding_dim = 5120 
+    embedding_dim = 320
     dropout = 0.1
-    n_transformer_layers = 48
-    n_attn_heads = 40
+    n_transformer_layers = 12
+    n_attn_heads = 10
 
     bert = BERT(embedding_dim, dropout, max_len, mask_prob, n_transformer_layers, n_attn_heads)
-    bert.embedding.load_pretrained_embeddings(os.path.join(data_dir, 'esm_weights-embedding_dim5120.pth'), no_grad=False)
+    bert.embedding.load_pretrained_embeddings(os.path.join(data_dir, 'esm_weights-embedding_dim320.pth'), no_grad=False)
     tokenizer = ProteinTokenizer(max_len, mask_prob)
 
     model = ProteinLM(bert, vocab_size=len(token_to_index))

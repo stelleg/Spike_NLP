@@ -80,8 +80,8 @@ class RBDDataset(Dataset):
         return len(self.full_df)
 
     def __getitem__(self, idx):
-        # label, seq, target
-        return self.full_df['seq_id'][idx], self.full_df['sequence'][idx]
+        # label, seq
+        return self.full_df['seq_id'][idx], self.full_df['sequence'][idx], 
 
 # HELPER FUNCTIONS
 def count_parameters(model):
