@@ -28,20 +28,12 @@ from runner_util_dms import (
 )
 
 class GraphSAGE(nn.Module):
-    def __init__(self, input_channels, hidden_channels, fcn_num_layers):
+    def __init__(self, input_channels, hidden_channels):
         super(GraphSAGE, self).__init__()
         self.conv1 = SAGEConv(input_channels, hidden_channels)
         self.conv2 = SAGEConv(hidden_channels, hidden_channels)
-
-        # FCN layer(s)
-        layers = []
-
-        for _ in range(fcn_num_layers):
-            layers.append(nn.Linear(hidden_channels, hidden_channels))
-            layers.append(nn.ReLU())
-
-        self.fcn = nn.Sequential(*layers)
-        
+        self.fcn = nn.Linear(hidden_channels, hidden_channels)
+        self.relu = nn.ReLU()
         self.output = nn.Linear(hidden_channels, 1)
 
     def forward(self, x, edge_index, batch):
@@ -49,6 +41,7 @@ class GraphSAGE(nn.Module):
         x = self.conv2(x, edge_index)
         x = global_mean_pool(x, batch)
         x = self.fcn(x)
+        x = self.relu(x)
         output = self.output(x).squeeze(1)
         return output
 
@@ -209,17 +202,17 @@ if __name__=='__main__':
     max_batch = -1
     num_workers = 4
     lr = 1e-5
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
 
     # Data/results directories
-    result_tag = 'binding' # specify expression or binding
+    result_tag = 'expression' # specify expression or binding
     data_dir = os.path.join(os.path.dirname(__file__), f'../../../data/dms') 
     results_dir = os.path.join(os.path.dirname(__file__), f'../../../results/run_results/esm_gcn')
 
     # Create run directory for results
     now = datetime.datetime.now()
     date_hour_minute = now.strftime("%Y-%m-%d_%H-%M")
-    run_dir = os.path.join(results_dir, f"5_relu-adam.lr{lr}.esm_gcn-DMS_OLD-{result_tag}-{date_hour_minute}")
+    run_dir = os.path.join(results_dir, f"fix_adam.lr{lr}.esm_gcn-DMS_OLD-{result_tag}-{date_hour_minute}")
     os.makedirs(run_dir, exist_ok = True)
 
     # Create Dataset and DataLoader
@@ -263,8 +256,7 @@ if __name__=='__main__':
     size = 320
     input_channels = size # Number of input channels (dimensions of the embeddings)
     hidden_channels = size
-    fcn_num_layers = 5
-    gcn = GraphSAGE(input_channels, hidden_channels, fcn_num_layers)
+    gcn = GraphSAGE(input_channels, hidden_channels)
 
     model = ESM_GCN(esm, gcn)
 
