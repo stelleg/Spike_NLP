@@ -4,6 +4,8 @@
 *saved_model-epoch_[0-9][0-9][0-9].pth
 *saved_model-epoch_[0-9][0-9][0-9][0-9].pth
 *checkpoint_saved_model.pth
+*best_saved_binding_model.pth
+*best_saved_expression_model.pth
 
 !bert_mlm/**/saved_model-epoch_100.pth
 !bert_mlm/**/checkpoint_saved_model.pth
