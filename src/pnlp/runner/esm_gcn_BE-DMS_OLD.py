@@ -27,7 +27,6 @@ from runner_util_dms import (
     plot_log_file_BE,
 )
 
-
 class GraphSAGE(nn.Module):
     def __init__(self, input_channels, hidden_channels, fcn_num_layers):
         super(GraphSAGE, self).__init__()

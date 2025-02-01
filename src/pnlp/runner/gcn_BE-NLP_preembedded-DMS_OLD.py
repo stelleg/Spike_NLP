@@ -28,17 +28,28 @@ from runner_util_dms import (
 )
 
 class GraphSAGE(nn.Module):
-    def __init__(self, input_channels, hidden_channels):
+    def __init__(self, input_channels, hidden_channels, fcn_num_layers):
         super(GraphSAGE, self).__init__()
         self.conv1 = SAGEConv(input_channels, hidden_channels)
         self.conv2 = SAGEConv(hidden_channels, hidden_channels)
+
+        # FCN layer(s)
+        layers = []
+
+        for _ in range(fcn_num_layers):
+            layers.append(nn.Linear(hidden_channels, hidden_channels))
+            layers.append(nn.ReLU())
+
+        self.fcn = nn.Sequential(*layers)
+        
         self.binding_output = nn.Linear(hidden_channels, 1)
         self.expression_output = nn.Linear(hidden_channels, 1)
 
     def forward(self, x, edge_index, batch):
-        x = self.conv1(x, edge_index).relu()
-        x = self.conv2(x, edge_index).relu()
+        x = self.conv1(x, edge_index)
+        x = self.conv2(x, edge_index)
         x = global_mean_pool(x, batch)
+        x = self.fcn(x)
         binding_output = self.binding_output(x).squeeze(1)
         expression_output = self.expression_output(x).squeeze(1)
         return binding_output, expression_output
@@ -56,6 +67,8 @@ def run_model(model, train_data_loader, test_data_loader, n_epochs: int, lr:floa
 
     starting_epoch = 1
     best_rmse = float('inf')
+    best_binding_rmse = float('inf')
+    best_expression_rmse = float('inf')
 
     # Load saved model
     if saved_model_pth is not None and os.path.exists(saved_model_pth):
@@ -106,6 +119,18 @@ def run_model(model, train_data_loader, test_data_loader, n_epochs: int, lr:floa
             model_path = os.path.join(run_dir, f'best_saved_model.pth')
             print(f"NEW BEST model: RMSE loss {best_rmse:.4f}")
             save_model(model, optimizer, model_path, epoch, test_be_rmse)
+
+        if test_binding_rmse < best_binding_rmse:
+            best_binding_rmse = test_binding_rmse
+            model_path = os.path.join(run_dir, f'best_saved_binding_model.pth')
+            print(f"NEW BEST binding model: RMSE binding loss {best_binding_rmse:.4f}")
+            save_model(model, optimizer, model_path, epoch, test_binding_rmse)
+
+        if test_expression_rmse < best_expression_rmse:
+            best_expression_rmse = test_expression_rmse
+            model_path = os.path.join(run_dir, f'best_saved_expression_model.pth')
+            print(f"NEW BEST expression model: RMSE expression loss {best_expression_rmse:.4f}")
+            save_model(model, optimizer, model_path, epoch, test_expression_rmse)
         
         # Save every 100 epochs
         if epoch > 0 and epoch % 100 == 0:
@@ -216,7 +241,7 @@ if __name__=='__main__':
     # Create run directory for results
     now = datetime.datetime.now()
     date_hour_minute = now.strftime("%Y-%m-%d_%H-%M")
-    run_dir = os.path.join(results_dir, f"adam.lr{lr}.gcn_BE-NLP_preembedded-DMS_OLD-{date_hour_minute}")
+    run_dir = os.path.join(results_dir, f"5_relu-adam.lr{lr}.gcn_BE-NLP_preembedded-DMS_OLD-{date_hour_minute}")
     os.makedirs(run_dir, exist_ok = True)
 
    # Create Dataset and DataLoader
@@ -255,7 +280,8 @@ if __name__=='__main__':
     size = 320
     input_channels = size # Number of input channels (dimensions of the embeddings)
     hidden_channels = size
-    model = GraphSAGE(input_channels, hidden_channels)
+    fcn_num_layers = 5
+    model = GraphSAGE(input_channels, hidden_channels, fcn_num_layers)
 
     # Run
     count_parameters(model)

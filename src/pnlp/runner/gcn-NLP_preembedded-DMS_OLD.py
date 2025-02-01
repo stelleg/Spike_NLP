@@ -28,16 +28,27 @@ from runner_util_dms import (
 )
 
 class GraphSAGE(nn.Module):
-    def __init__(self, input_channels, hidden_channels):
+    def __init__(self, input_channels, hidden_channels, fcn_num_layers):
         super(GraphSAGE, self).__init__()
         self.conv1 = SAGEConv(input_channels, hidden_channels)
         self.conv2 = SAGEConv(hidden_channels, hidden_channels)
+
+        # FCN layer(s)
+        layers = []
+
+        for _ in range(fcn_num_layers):
+            layers.append(nn.Linear(hidden_channels, hidden_channels))
+            layers.append(nn.ReLU())
+
+        self.fcn = nn.Sequential(*layers)
+        
         self.output = nn.Linear(hidden_channels, 1)
 
     def forward(self, x, edge_index, batch):
         x = self.conv1(x, edge_index)
-        x = self.conv2(x, edge_index).relu()
+        x = self.conv2(x, edge_index)
         x = global_mean_pool(x, batch)
+        x = self.fcn(x)
         output = self.output(x).squeeze(1)
         return output
 
@@ -192,7 +203,7 @@ if __name__=='__main__':
     # Create run directory for results
     now = datetime.datetime.now()
     date_hour_minute = now.strftime("%Y-%m-%d_%H-%M")
-    run_dir = os.path.join(results_dir, f"adam.lr{lr}.gcn-NLP_preembedded-DMS_OLD-{result_tag}-{date_hour_minute}")
+    run_dir = os.path.join(results_dir, f"5_relu-adam.lr{lr}.gcn-NLP_preembedded-DMS_OLD-{result_tag}-{date_hour_minute}")
     os.makedirs(run_dir, exist_ok = True)
 
     # Create Dataset and DataLoader
@@ -231,7 +242,8 @@ if __name__=='__main__':
     size = 320
     input_channels = size # Number of input channels (dimensions of the embeddings)
     hidden_channels = size
-    model = GraphSAGE(input_channels, hidden_channels)
+    fcn_num_layers = 5
+    model = GraphSAGE(input_channels, hidden_channels, fcn_num_layers)
 
     # Run
     count_parameters(model)
