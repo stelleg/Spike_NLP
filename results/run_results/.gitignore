@@ -12,6 +12,11 @@
 !bert_mlm-esm_init/**/saved_model-epoch_100.pth
 !bert_mlm-esm_init/**/checkpoint_saved_model.pth
 
+gcn-ESM_AA_preembedded/old
+gcn-NLP_preembedded/old
+esm_gcn/old
+bert_gcn/old
+
 # Files are too big for github
 esm_blstm/**/*.pth
 esm_blstm-bert_mlm_esm_init/**/*.pth
