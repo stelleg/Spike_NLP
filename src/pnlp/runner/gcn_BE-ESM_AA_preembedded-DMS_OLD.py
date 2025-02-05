@@ -232,7 +232,7 @@ if __name__=='__main__':
     max_batch = -1
     num_workers = 4
     lr = 1e-5
-    device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Data/results directories
     data_dir = os.path.join(os.path.dirname(__file__), f'../../../data/dms') 
