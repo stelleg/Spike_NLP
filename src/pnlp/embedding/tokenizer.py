@@ -5,6 +5,8 @@ import math
 import random
 import torch
 import torch.nn as nn
+import lightning as L
+
 from typing import Tuple
 from typing import Sequence
 
@@ -22,7 +24,7 @@ token_to_index = {**aa_to_token, **additional_token_to_index}
 index_to_token = {index: token for token, index in token_to_index.items()}
 PADDING_IDX = token_to_index['<PAD>']
 
-class ProteinTokenizer(nn.Module):
+class ProteinTokenizer(L.LightningModule):
 
 
     def __init__(self, max_len: int, mask_prob: float):

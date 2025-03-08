@@ -3,8 +3,9 @@
 import math
 import torch
 import torch.nn as nn
+import lightning as L
 
-class Attention(nn.Module):
+class Attention(L.LightningModule):
     """Single head scaled dot product attention"""
     def __init__(self):
         super().__init__()
@@ -23,7 +24,7 @@ class Attention(nn.Module):
         return torch.matmul(p_attn, value), p_attn
 
 # %%
-class MultiHeadedAttention(nn.Module):
+class MultiHeadedAttention(L.LightningModule):
     """
     Multi-head attention
 

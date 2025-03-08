@@ -7,11 +7,12 @@ import os
 import math
 import torch
 import torch.nn as nn
+import lightning as L
 
 from pnlp.embedding.tokenizer import ProteinTokenizer, token_to_index, PADDING_IDX
 
 
-class PositionalEmbedding(nn.Module):
+class PositionalEmbedding(L.LightningModule):
     """
     Impement the PE function.
 
@@ -27,7 +28,7 @@ class PositionalEmbedding(nn.Module):
         self.dropout = nn.Dropout(p=dropout)
 
         # Compute the positional encodings once in log space.
-        pe = torch.zeros(max_len, d_model)
+        pe = torch.zeros(max_len, d_model).to(self.device)
         position = torch.arange(0, max_len).unsqueeze(1)
         div_term = torch.exp(torch.arange(0, d_model, 2) * -(math.log(10000.0)/d_model))
         pe[:, 0::2] = torch.sin(position * div_term)
@@ -41,7 +42,7 @@ class PositionalEmbedding(nn.Module):
         return self.dropout(x)
 
 
-class NLPEmbedding(nn.Module):
+class NLPEmbedding(L.LightningModule):
     """
     Encode batched amino acid sequences. In our model, we only need the token and position embedding
     but not the segment embedding <SEP> used in the orignal BERT.
@@ -85,10 +86,9 @@ class NLPEmbedding(nn.Module):
 
         (batch_size, seq_len) = batch_token.shape
         padding_masks = batch_token == self.padding_idx
-        padding_masks = padding_masks.unsqueeze(2).expand(batch_size, seq_len, seq_len)
+        padding_masks = padding_masks.unsqueeze(2).expand(batch_size, seq_len, seq_len).to(self.device)
 
-        mask_tensor = torch.ones(batch_size, seq_len, seq_len)
-        mask_tensor = mask_tensor.to(batch_token.device)  # same device as input
-        mask_tensor = mask_tensor.masked_fill(padding_masks, 0.0)
+        mask_tensor = torch.ones(batch_size, seq_len, seq_len).to(self.device)
+        mask_tensor = mask_tensor.masked_fill(padding_masks, 0.0).to(self.device)
 
         return self.dropout(x), mask_tensor

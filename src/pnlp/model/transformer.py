@@ -2,11 +2,12 @@
 
 import torch
 import torch.nn as nn
+import lightning as L
 
 from pnlp.model.attention import MultiHeadedAttention
 
 
-class LayerNorm(nn.Module):
+class LayerNorm(L.LightningModule):
     """
     Construct a layernorm module
     
@@ -28,7 +29,7 @@ class LayerNorm(nn.Module):
         return self.a_2 * (x-mean) / (std + self.eps) + self.b_2
 
 
-class SublayerConnection(nn.Module):
+class SublayerConnection(L.LightningModule):
     """A residual connection followed by a layer norm.
     Note for code simplicity the norm is first as opposed to last.
     """
@@ -42,7 +43,7 @@ class SublayerConnection(nn.Module):
         "Apply residual connection to any sublayer with the same size"
         return x + self.dropout(sublayer(self.norm(x)))
 
-class PositionwiseFeedForward(nn.Module):
+class PositionwiseFeedForward(L.LightningModule):
     """Implements FFN equation."""
 
     def __init__(self, d_model, d_ff, dropout=0.1):
@@ -56,7 +57,7 @@ class PositionwiseFeedForward(nn.Module):
         return self.w_2(self.dropout(self.activation(self.w_1(x))))
 
 
-class TransformerBlock(nn.Module):
+class TransformerBlock(L.LightningModule):
     """Transformer"""
 
     def __init__(self, hidden, attn_heads, feed_forward_hidden, dropout):

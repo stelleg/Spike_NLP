@@ -3,3 +3,5 @@ seaborn
 prettytable
 pandas
 tqdm
+lightning
+deepspeed
