@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import lightning as L
 
-from pnlp.model.bert_lightning import BERT
+from pnlp.model.bert import BERT
 
 
 class ProteinMaskedLanguageModel(L.LightningModule):
