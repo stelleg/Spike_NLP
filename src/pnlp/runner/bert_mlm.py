@@ -84,10 +84,20 @@ if __name__=='__main__':
 
     model = ProteinLM(bert, tokenizer, vocab_size=len(token_to_index))
 
+    num_nodes = os.environ.get('SLURM_JOB_NUM_NODES')
+
+    if num_nodes:
+        num_nodes = int(num_nodes)
+        print(f"The number of nodes allocated to this job is: {num_nodes}")
+    else:
+        num_modes = 1
+        print("SLURM_JOB_NUM_NODES environment variable is not set. Setting num_nodes=1.")
+
+
     # train
     trainer = L.Trainer(
         max_epochs=n_epochs,
-        num_nodes=4,
+        num_nodes=num_nodes,
         strategy='deepspeed')
     trainer.fit(model=model, train_dataloaders=train_data_loader)
 
